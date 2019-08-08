@@ -1,11 +1,11 @@
 #include <cstdlib> // for malloc(), size_t, exit()
 #include <fstream>
 #include "memory.h"
-#include "io.h"
 
 Memory::Memory(u32 size) {
 	ram = (u8 *)malloc((size_t)size);
 	sysrom = (u8 *)malloc((size_t)SYSROM_SIZE);
+	mem = this;
 	
 	// システムROMの読み込み
 	std::ifstream fin("roms/FMT_SYS.ROM", std::ios::in | std::ios::binary);
@@ -51,8 +51,4 @@ u8 Memory::read8(u32 addr) {
 
 void Memory::write8(u32 addr, u8 data) {
 	*(ram + addr) = data;
-}
-
-void Memory::setio(pSUMOT::IO *i) {
-	io = i;
 }

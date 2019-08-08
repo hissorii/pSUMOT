@@ -11,10 +11,15 @@
 namespace pSUMOT {
 
 IO::IO(u32 size) {
-	io = (u8 *)malloc((size_t)size);
+	iop = (u8 *)malloc((size_t)size);
+	io = this;
 }
 u8 IO::read8(u32 addr) {
-	return *(io + addr);
+	return *(iop + addr);
+}
+
+void IO::write8(u32 addr, u8 data) {
+
 }
 
 } // namespace pSUMOT

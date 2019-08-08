@@ -1,16 +1,12 @@
 #include "types.h"
-
-namespace pSUMOT {
-	class IO;
-}
+#include "bus.h"
 
 #define SYSROM_SIZE 256*1024
 
-class Memory {
+class Memory : public BUS {
 private:
 	u8 *ram;
 	u8 *sysrom;
-	pSUMOT::IO *io;
 	Memory *memo;
  public:
 	/*-----
@@ -19,5 +15,4 @@ private:
 	Memory(u32 size);
 	u8 read8(u32 addr);
 	void write8(u32 addr, u8 data);
-	void setio(pSUMOT::IO *i);
 };

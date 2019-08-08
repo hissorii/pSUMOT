@@ -1,6 +1,6 @@
 #include <iostream>
-#include "io.h"
 #include "memory.h"
+#include "io.h"
 #include "cpu.h"
 
 int main(void)
@@ -10,7 +10,6 @@ int main(void)
 
 	CPU cpu(&mem);
 	pSUMOT::IO io(0x10000);
-	mem.setio(&io);
 	
 	int i;
 	for (i = 0xf8000; i < 0xf8050; i++) {
