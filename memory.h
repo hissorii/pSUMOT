@@ -15,4 +15,5 @@ private:
 	Memory(u32 size);
 	u8 read8(u32 addr);
 	void write8(u32 addr, u8 data);
+	u16 read16(u32 addr);
 };

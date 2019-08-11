@@ -9,7 +9,7 @@ $(TARGET): $(OBJS)
 	$(CXX) -o $@ $(OBJS)
 
 #dependencies
-cpu.o: cpu.h memory.h types.h
+cpu.o: cpu.h bus.h types.h
 main.o: io.h cpu.h memory.h types.h
 memory.o: memory.h bus.h types.h
 io.o: io.h bus.h types.h

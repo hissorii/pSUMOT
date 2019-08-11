@@ -22,4 +22,9 @@ void IO::write8(u32 addr, u8 data) {
 
 }
 
+u16 IO::read16(u32 addr) {
+	return (*(iop + addr) << 8) + *(iop + addr + 1);
+}
+
+
 } // namespace pSUMOT

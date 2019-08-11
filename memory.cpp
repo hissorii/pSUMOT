@@ -44,11 +44,19 @@ u8 Memory::read8(u32 addr) {
 			// ブートROM領域内の値を返す
 			return *(sysrom + 0x38000 + addr - 0xf8000);
 		}
-
+		return *(ram + addr);		
+	}
+	if (addr >= 0xfffc0000) {
+			// システムROM領域内の値を返す
+		return *(sysrom + (addr - 0xfffc0000));
 	}
 	return *(ram + addr);
 }
 
 void Memory::write8(u32 addr, u8 data) {
 	*(ram + addr) = data;
+}
+
+u16 Memory::read16(u32 addr) {
+	return (read8(addr + 1) << 8) + read8(addr);
 }

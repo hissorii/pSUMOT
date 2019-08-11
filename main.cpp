@@ -7,18 +7,20 @@ int main(void)
 {
 	// RAM 6MB
 	Memory mem((u32)0x600000);
+	pSUMOT::IO io(0x10000);
 
 	CPU cpu(&mem);
-	pSUMOT::IO io(0x10000);
-	
+
+#if 0
 	int i;
 	for (i = 0xf8000; i < 0xf8050; i++) {
 		std::cout << std::hex << (int)mem.read8(i);
 	}
-	return(0);
+#endif
 
 	cpu.reset();
-	while (1) {
-		cpu.exec();
-	}
+	//	while (1) {
+	cpu.exec();
+	cpu.exec();
+		//	}
 }
