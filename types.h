@@ -29,7 +29,7 @@ sed '/\/\*-----/,/-----\*\//d' cpu.h
     namecpace B {
       int a;
     }
-    using name space A;
+    using namespace A;
     int main() {
       a = 10;
       B::a = 20;

@@ -19,8 +19,6 @@ int main(void)
 #endif
 
 	cpu.reset();
-	//	while (1) {
-	cpu.exec();
-	cpu.exec();
-		//	}
+	for (int i = 0; i < 4; i++)
+		cpu.exec();
 }
