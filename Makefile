@@ -3,6 +3,10 @@ TARGET = psumot
 # for debugging
 CXXFLAGS += -Wall
 
+# for core debugging
+CXXFLAGS += -DCORE_DBG
+
+
 OBJS = main.o cpu.o memory.o io.o bus.o
 
 $(TARGET): $(OBJS)

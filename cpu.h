@@ -112,8 +112,11 @@ private:
 		} reg8;
 	} reg[NR_GENREG];
 
-	char genreg_name16[NR_GENREG][3] = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
-	char genreg_name32[NR_GENREG][4] = {"eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"};
+	char genreg_name[3][NR_GENREG][4] = {
+		{"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"},
+		{"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"},
+		{"eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"}
+	};
 
 	// al, cl, dl, bl, ah, ch, dh, bhの順に取り出す
 	u8* genreg8[8] = {&al, &cl, &dl, &bl, &ah, &ch, &dh, &bh};
@@ -158,9 +161,9 @@ private:
 
 	void prt_post_op(u8 n);
 	u8 nr_disp_modrm(u8 modrm);
-	u16 modrm16w(u8 modrm);
+	u16 modrm16(u8 modrm, bool isWord);
 	u8 modrm16b(u8 modrm);
-	void disas_modrm16w(u8 modrm);
+	void disas_modrm16(u8 modrm, bool isReg, bool isDest, bool isWord);
 public:
 	CPU(BUS* bus);
 	void reset();

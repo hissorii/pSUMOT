@@ -19,7 +19,7 @@ u8 IO::read8(u32 addr) {
 }
 
 void IO::write8(u32 addr, u8 data) {
-
+	*(iop + addr) = data;
 }
 
 u16 IO::read16(u32 addr) {
