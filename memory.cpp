@@ -60,3 +60,8 @@ void Memory::write8(u32 addr, u8 data) {
 u16 Memory::read16(u32 addr) {
 	return (read8(addr + 1) << 8) + read8(addr);
 }
+
+void Memory::write16(u32 addr, u16 data) {
+	*(ram + addr) = data & 8;
+	*(ram + addr + 1) = data >> 8;
+}

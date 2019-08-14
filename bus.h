@@ -19,6 +19,7 @@ public:
 	virtual u8 read8(u32 addr) = 0;
 	virtual void write8(u32 addr, u8 data) = 0;
 	virtual u16 read16(u32 addr) = 0;
+	virtual void write16(u32 addr, u16 data) = 0;
 
 	BUS* get_bus(const char *s);
 };
