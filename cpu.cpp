@@ -1,19 +1,60 @@
 #include <cstdio> // for printf()
 #include "cpu.h"
 
-using namespace std;
+using namespace std; // for printf()
 
 CPU::CPU(BUS* bus) {
 	mem = bus->get_bus("mem");
 	io = bus->get_bus("io");
+
+	// バイト同士の演算によるフラグSF/ZF/PF/CFの状態をあらかじめ算出する
+	// キャリーフラグ算出のため、配列長は9ビットである
+	for (int i = 0; i < 0x200; i++) {
+		u8 sf, zf, pf, cf;
+		sf = (i & 0x80)? SF : 0;
+		zf = (i == 0)? ZF : 0;
+		pf = i;
+		pf ^= pf >> 4;
+		pf ^= pf >> 2;
+		pf ^= pf >> 1;
+		pf = pf? 0 : PF;
+		cf = (i & 0x100)? CF : 0;
+		flag_calb[i] = sf | zf | pf | cf;
+	}
+	// ワード同士の演算によるフラグSF/ZF/PF/CFの状態をあらかじめ算出する
+	// キャリーフラグ算出のため、配列長は17ビットである
+	for (int i = 0; i < 0x20000; i++) {
+		u8 sf, zf, cf;
+		u16 pf;
+		sf = (i & 0x8000)? SF : 0;
+		zf = (i == 0)? ZF : 0;
+		pf = i;
+		pf ^= pf >> 8;
+		pf ^= pf >> 4;
+		pf ^= pf >> 2;
+		pf ^= pf >> 1;
+		pf = pf? 0 : PF;
+		cf = (i & 0x10000)? CF : 0;
+		flag_calw[i] = sf | zf | pf | cf;
+	}
+	// ダブルワード同士の演算をあらかじめ算出しておくには、配列長33ビットの
+	// 配列を用意しなければならないため現実的ではない。
+	// そのため、ダブルワード同士の演算によるフラグはその都度算出する。
 }
 
+/*
+  以下の様なレジスタの状態を出力する
+eax:b6f90000 ecx:bea69328 edx:123431cc ebx:85f4d995   eflags:00000000
+esp:000002de ebp:b6f7b498 esi:b6f9eb58 edi:bea69340
+cs:fc00 ds:0000 es:0000 ss:0000 fs:0000 gs:0000
+*/
 void CPU::dump_reg() {
 	int i;
 
 	for (i = 0; i < 4; i++) {
 		printf("%s:%08x ", genreg_name[2][i], genreg32(i));
 	}
+	printf("  eflags:%08x", flag8);
 	printf("\n");
 	for (i = 4; i < NR_GENREG; i++) {
 		printf("%s:%08x ", genreg_name[2][i], genreg32(i));
@@ -53,6 +94,7 @@ void CPU::reset() {
 	  セグメントディスクリプタキャッシュのセグメントベースはcs<<4に戻る?
 	 */
 	sdcr[CS].base = 0xffff0000;
+	flag8 = 0;
 }
 
 void CPU::prt_post_op(u8 n) {
@@ -195,8 +237,9 @@ void CPU::disas_modrm16(u8 modrm, bool isReg, bool isDest, bool isWord) {
 void CPU::exec() {
 	u8 op, subop;
 //	u8 arg1, arg2, tmp1;
-	u16 warg1, warg2;
-	u8 modrm;
+	u8 tmp8;
+	u16 tmp16, warg1, warg2;
+	u8 modrm, rm;
 #ifdef CORE_DBG
 	char str8x[8][4] = {"ADD", "", "ADC", "SBB", "", "SUB", "", "CMP"};
 #endif
@@ -209,32 +252,93 @@ void CPU::exec() {
 	case 0x00:
 		break;
 
+/******************** AND ********************/
 /*
++--------+-----------+---------+---------+
+|001000dw|mod reg r/m|(DISP-LO)|(DISP-HI)|
++--------+-----------+---------+---------+
+OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
+ */
+	case 0x20: // AND r/m8, r8
+	case 0x21: // AND r/m16, r16
+	case 0x22: // AND r8, r/m8
+	case 0x23: // AND r16, r/m16 (AND r32, r/m32)
+/*
++--------+--------+-------------+
+|0010010w|  data  |(data if w=1)|
++--------+--------+-------------+
+OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
+ */
+	case 0x24: // and al, Imm8
+#ifdef CORE_DBG
+		prt_post_op(1);
+		printf("AND AL, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
+#endif
+		al &= mem->read8(get_seg_adr(CS, ip++));
+		flag8 = flag_calb[al];
+		flagu8 &= OFCLR8;
+		break;
+	case 0x25: // AND AX, Imm16 (AND EAX, imm32)
+#ifdef CORE_DBG
+		prt_post_op(2);
+		printf("AND AX, 0x%02x\n\n", mem->read16(get_seg_adr(CS, ip)));
+#endif
+		ax &= mem->read16(get_seg_adr(CS, ip));
+		flag8 = flag_calw[ax];
+		flagu8 &= OFCLR8;
+		ip += 2;
+		break;
+
+/*
+XOR
           76  543 210
 +--------+-----------+---------+---------+
 |001100dw|mod reg r/m|(DISP-LO)|(DISP-HI)|
 +--------+-----------+---------+---------+
+OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
  */
 	case 0x32: // XOR.b reg, modR/M
 		modrm = mem->read8(get_seg_adr(CS, ip));
+		rm = modrm & 7;
 #ifdef CORE_DBG
 		prt_post_op(nr_disp_modrm(modrm) + 1);
 		printf("XOR ");
 		disas_modrm16(modrm, true, true, false);
 #endif
-		*genreg8[modrm & 7] ^= modrm16b(modrm);
+		tmp8 = *genreg8[rm];
+		tmp8 ^= modrm16b(modrm);
+		*genreg8[rm] = tmp8;
+		flag8 = flag_calb[tmp8];
+		flagu8 &= OFCLR8;
 		ip++;
 		break;
 
-	case 0x33:
+	case 0x33: // XOR.w reg, modR/M
 		modrm = mem->read8(get_seg_adr(CS, ip));
+		rm = modrm & 7;
 #ifdef CORE_DBG
 		prt_post_op(nr_disp_modrm(modrm) + 1);
 		printf("XOR ");
 		disas_modrm16(modrm, true, true, true);
 #endif
-		genreg16(modrm & 7) ^= modrm16w(modrm);
+		tmp16 = genreg16(rm);
+		tmp16 ^= modrm16w(modrm);
+		genreg16(rm) = tmp16;
+		flag8 = flag_calw[tmp16];
+		flagu8 &= OFCLR8;
 		ip++;
+		break;
+
+	case 0x75: // JNE, Imm8
+#ifdef CORE_DBG
+		prt_post_op(1);
+		printf("JNE 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
+#endif
+		if (flag8 & ZF) { // xxx マイナスの時の考慮必要
+			ip += mem->read8(get_seg_adr(CS, ip));
+		} else {
+			ip++;
+		}
 		break;
 
 /*
@@ -243,9 +347,9 @@ void CPU::exec() {
 |100000sw|mod ??? r/m|(DISP-LO)|(DISP-HI)|  data  |(data if sw=01)|
 +--------+-----------+---------+---------+--------+---------------+
 ???(ここではregではなく、opの拡張。これにより以下の様に命令が変わる):
-000:ADD, 010:ADC, 101:SUB, 011:SBB, 111:CMP
+000:ADD, 010:ADC, 100:AND, 101:SUB, 011:SBB, 111:CMP
  */
-	case 0x83: // ADD/ADC/SUB/SBB/CMP modR/M, Imm8
+	case 0x83: // ADD/ADC/AND/SUB/SBB/CMP r/m16, imm8 (... r/m32, imm8)
 		//w-bit 1なのでワード動作、s-bit 0なので即値は byte
 		modrm = mem->read8(get_seg_adr(CS, ip));
 		subop = modrm >> 3 & 7;
@@ -294,6 +398,20 @@ void CPU::exec() {
 		genreg16(modrm >> 3 & 3) = modrm16w(modrm);
 		break;
 
+/*
++--------+--------+
+|1010100w|  data  |
++--------+--------+
+ */
+	case 0xa8: // test al, Imm8
+#ifdef CORE_DBG
+		prt_post_op(1);
+		printf("TEST al, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
+#endif
+		tmp16 = al | mem->read8(get_seg_adr(CS, ip++));
+		flag8 = flag_calb[tmp16];
+
+		break;
 /*
  76543 210
 +---------+--------+-------------+
@@ -345,6 +463,26 @@ void CPU::exec() {
 
 /*
 +--------+--------+
+|1110010w| data-8 |
++--------+--------+
+ */
+	case 0xe4: // IN AL, Imm8
+#ifdef CORE_DBG
+		prt_post_op(1);
+		printf("IN AL, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
+#endif
+		al = io->read8(mem->read8(get_seg_adr(CS, ip++)));
+		break;
+	case 0xe5: // IN AX, Imm8
+#ifdef CORE_DBG
+		prt_post_op(1);
+		printf("IN AX, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
+#endif
+		ax = io->read16(mem->read8(get_seg_adr(CS, ip++)));
+		break;
+
+/*
++--------+--------+
 |1110011w| data-8 |
 +--------+--------+
  */
@@ -381,6 +519,20 @@ void CPU::exec() {
 		printf("OUT DX, AX\n\n");
 #endif
 		io->write16(dx, ax);
+		break;
+
+/*
++--------+--------+
+|11101011|IP-INC8 |
++--------+--------+
+ */
+	case 0xeb: //無条件ジャンプ/セグメントショート内直接
+#ifdef CORE_DBG
+		prt_post_op(1);
+		printf("JMP 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
+#endif
+		// xxx マイナスの時の考慮必要
+		ip += mem->read8(get_seg_adr(CS, ip)) + 1;
 		break;
 	}
 }

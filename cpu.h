@@ -152,6 +152,37 @@ private:
 
 	u16 ip;			    // インストラクションポインタ
 
+/*
+  フラグレジスタ
+   15                    8|7                     0
+  +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+  |  |  |  |  |OF|DF|IF|TF|SF|ZF|  |AF|  |PF|  |CF|
+  +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+  * OFが立つ場合 (最上位ビット(正負を決めるビット)が変わってしまった場合)
+     1xxx xxxx           0xxx xxxx
+   +)1xxx xxxx         +)0xxx xxxx         加算する数のMSBをそれぞれA, B、
+   -----------  または  ----------  つまり 和のMSBをCとすると、A^C&B^C
+     0xxx xxxx           1xxx xxxx                             =======
+     (正と負の加算はオーバーフローは生じない)
+
+  * AFが立つ場合 (BCD下位の桁(下位4ビット)から桁上りが生じた場合)
+     xxx0 xxxx           xxx1 xxxx           xxx0 xxxx           xxx1 xxxx
+   +)xxx1 xxxx         +)xxx0 xxxx         +)xxx0 xxxx         +)xxx1 xxxx
+   -----------  または -----------  または  ----------  または  ----------
+     xxx0 xxxx           xxx0 xxxx           xxx1 xxxx           xxx1 xxxx
+
+   つまり加算する数のMSBをそれぞれA, B、和のMSBをCとすると、A^B^C
+                                                            =====
+*/
+	enum {CF = 1 << 0, PF = 1 << 2, AF = 1 << 4, ZF = 1 << 6, SF = 1 << 7,
+	      TF = 1 << 8, IF = 1 << 9, DF = 1 << 10, OF = 1 << 11};
+#define OFCLR8 0xf7;
+	u8 flag8; // フラグの下位8ビット
+	u16 flagu8; // フラグの上位8ビット(16ビットのうち上位8ビットを使う)
+	u8 flag_calb[0x200]; // 512バイト
+	u8 flag_calw[0x20000]; // 128Kバイト
+
 	BUS *mem, *io;
 
 	void dump_reg();
