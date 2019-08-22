@@ -252,6 +252,14 @@ void CPU::exec() {
 	case 0x00:
 		break;
 
+/******************** PUSH ********************/
+	case 0x1e: // PUSH DS
+#ifdef CORE_DBG
+		prt_post_op(0);
+		printf("PUSH DS\n\n");
+#endif
+		mem->write16(get_seg_adr(SS, --sp), segreg[DS]);
+		break;
 /******************** AND ********************/
 /*
 +--------+-----------+---------+---------+
@@ -262,14 +270,29 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	case 0x20: // AND r/m8, r8
 	case 0x21: // AND r/m16, r16
 	case 0x22: // AND r8, r/m8
+		modrm = mem->read8(get_seg_adr(CS, ip));
+		rm = modrm & 7;
+#ifdef CORE_DBG
+		prt_post_op(nr_disp_modrm(modrm) + 1);
+		printf("AND ");
+		disas_modrm16(modrm, true, true, false);
+#endif
+		tmp8 = *genreg8[rm];
+		tmp8 &= modrm16b(modrm);
+		*genreg8[rm] = tmp8;
+		flag8 = flag_calb[tmp8];
+		flagu8 &= OFCLR8;
+		ip++;
+		break;
 	case 0x23: // AND r16, r/m16 (AND r32, r/m32)
+		break;
 /*
 +--------+--------+-------------+
 |0010010w|  data  |(data if w=1)|
 +--------+--------+-------------+
 OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
  */
-	case 0x24: // and al, Imm8
+	case 0x24: // and al, imm8
 #ifdef CORE_DBG
 		prt_post_op(1);
 		printf("AND AL, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
@@ -278,7 +301,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		flag8 = flag_calb[al];
 		flagu8 &= OFCLR8;
 		break;
-	case 0x25: // AND AX, Imm16 (AND EAX, imm32)
+	case 0x25: // AND AX, imm16 (AND EAX, imm32)
 #ifdef CORE_DBG
 		prt_post_op(2);
 		printf("AND AX, 0x%02x\n\n", mem->read16(get_seg_adr(CS, ip)));
@@ -329,7 +352,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		ip++;
 		break;
 
-	case 0x75: // JNE, Imm8
+	case 0x75: // JNE, imm8
 #ifdef CORE_DBG
 		prt_post_op(1);
 		printf("JNE 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
@@ -359,7 +382,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		disas_modrm16(modrm, false, false, true);
 		printf("0x%02x\n\n", mem->read8(get_seg_adr(CS, ip + 1)));
 #endif
-		// xxx SUB DX, Imm8 のみ実装
+		// xxx SUB DX, imm8 のみ実装
 		switch (subop) {
 		case 5: // SUB
 			if (modrm >> 6 == 3) {
@@ -403,7 +426,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 |1010100w|  data  |
 +--------+--------+
  */
-	case 0xa8: // test al, Imm8
+	case 0xa8: // test al, imm8
 #ifdef CORE_DBG
 		prt_post_op(1);
 		printf("TEST al, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
@@ -418,28 +441,42 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 |1011w reg|  data  |(data if w=1)|
 +---------+--------+-------------+
  */
-	case 0xb0: // mov al, Imm8
-	case 0xb1: // mov cl, Imm8
-	case 0xb2: // mov dl, Imm8
-	case 0xb3: // mov bl, Imm8
-	case 0xb4: // mov ah, Imm8
-	case 0xb5: // mov ch, Imm8
-	case 0xb6: // mov dh, Imm8
-	case 0xb7: // mov bh, Imm8
+	case 0xb0: // MOV AL, imm8
+		// go through
+	case 0xb1: // MOV CL, imm8
+		// go through
+	case 0xb2: // MOV DL, imm8
+		// go through
+	case 0xb3: // MOV BL, imm8
+		// go through
+	case 0xb4: // MOV AH, imm8
+		// go through
+	case 0xb5: // MOV CH, imm8
+		// go through
+	case 0xb6: // MOV DH, imm8
+		// go through
+	case 0xb7: // MOV BH, imm8
 #ifdef CORE_DBG
 		prt_post_op(1);
 		printf("MOV %s, 0x%02x\n\n", genreg_name[0][op & 7], mem->read8(get_seg_adr(CS, ip)));
 #endif
 		*genreg8[op & 7] = mem->read8(get_seg_adr(CS, ip++));
 		break;
-	case 0xb8: // mov ax, Imm16
-	case 0xb9: // mov cx, Imm16
-	case 0xba: // mov dx, Imm16
-	case 0xbb: // mov bx, Imm16
-	case 0xbc: // mov sp, Imm16
-	case 0xbd: // mov bp, Imm16
-	case 0xbe: // mov si, Imm16
-	case 0xbf: // mov di, Imm16
+	case 0xb8: // MOV AX, imm16
+		// go through
+	case 0xb9: // MOV CX, imm16
+		// go through
+	case 0xba: // MOV DX, imm16
+		// go through
+	case 0xbb: // MOV BX, imm16
+		// go through
+	case 0xbc: // MOV SP, imm16
+		// go through
+	case 0xbd: // MOV BP, imm16
+		// go through
+	case 0xbe: // MOV SI, imm16
+		// go through
+	case 0xbf: // MOV DI, imm16
 #ifdef CORE_DBG
 		prt_post_op(2);
 		printf("MOV %s, 0x%04x\n\n", genreg_name[1][op & 7], mem->read16(get_seg_adr(CS, ip)));
@@ -461,19 +498,20 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 #endif
 		break;
 
+/******************** IN/OUT ********************/
 /*
 +--------+--------+
 |1110010w| data-8 |
 +--------+--------+
  */
-	case 0xe4: // IN AL, Imm8
+	case 0xe4: // IN AL, imm8
 #ifdef CORE_DBG
 		prt_post_op(1);
 		printf("IN AL, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
 #endif
 		al = io->read8(mem->read8(get_seg_adr(CS, ip++)));
 		break;
-	case 0xe5: // IN AX, Imm8
+	case 0xe5: // IN AX, imm8 (xxx IN EAX, imm8)
 #ifdef CORE_DBG
 		prt_post_op(1);
 		printf("IN AX, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
@@ -486,19 +524,39 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 |1110011w| data-8 |
 +--------+--------+
  */
-	case 0xe6: // OUT Imm8, AL
+	case 0xe6: // OUT imm8, AL
 #ifdef CORE_DBG
 		prt_post_op(1);
 		printf("OUT 0x%02x, AL\n\n", mem->read8(get_seg_adr(CS, ip)));
 #endif
 		io->write8(mem->read8(get_seg_adr(CS, ip++)), al);
 		break;
-	case 0xe7: // OUT Imm8, AX
+	case 0xe7: // OUT imm8, AX
 #ifdef CORE_DBG
 		prt_post_op(1);
 		printf("OUT 0x%02x, AX\n\n", mem->read8(get_seg_adr(CS, ip)));
 #endif
 		io->write16(mem->read8(get_seg_adr(CS, ip++)), ax);
+		break;
+
+/*
++--------+
+|1110110w|
++--------+
+ */
+	case 0xec: // IN AL, DX
+#ifdef CORE_DBG
+		prt_post_op(0);
+		printf("IN AL, DX\n\n");
+#endif
+		al = io->read8(dx);
+		break;
+	case 0xed: // IN AX, DX (xxx IN EAX, DX)
+#ifdef CORE_DBG
+		prt_post_op(0);
+		printf("IN AX, DX\n\n");
+#endif
+		ax = io->read16(dx);
 		break;
 
 /*

@@ -113,9 +113,9 @@ private:
 	} reg[NR_GENREG];
 
 	char genreg_name[3][NR_GENREG][4] = {
-		{"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"},
-		{"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"},
-		{"eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"}
+		{"AL", "CL", "DL", "BL", "AH", "CH", "DH", "BH"},
+		{"AX", "CX", "DX", "BX", "SP", "BP", "SI", "DI"},
+		{"EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI"}
 	};
 
 	// al, cl, dl, bl, ah, ch, dh, bhの順に取り出す
