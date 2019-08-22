@@ -42,30 +42,6 @@ CPU::CPU(BUS* bus) {
 	// そのため、ダブルワード同士の演算によるフラグはその都度算出する。
 }
 
-/*
-  以下の様なレジスタの状態を出力する
-eax:b6f90000 ecx:bea69328 edx:123431cc ebx:85f4d995   eflags:00000000
-esp:000002de ebp:b6f7b498 esi:b6f9eb58 edi:bea69340
-cs:fc00 ds:0000 es:0000 ss:0000 fs:0000 gs:0000
-*/
-void CPU::dump_reg() {
-	int i;
-
-	for (i = 0; i < 4; i++) {
-		printf("%s:%08x ", genreg_name[2][i], genreg32(i));
-	}
-	printf("  eflags:%08x", flag8);
-	printf("\n");
-	for (i = 4; i < NR_GENREG; i++) {
-		printf("%s:%08x ", genreg_name[2][i], genreg32(i));
-	}
-	printf("\n");
-	for (i = 0; i < NR_SEGREG; i++) {
-		printf("%s:%04x ", segreg_name[i], segreg[i]);
-	}
-	printf("\n\n");
-}
-
 // - 引数aにセグメントを加算したアドレスを返却する
 // - 386では、セグメント加算は、プロテクトモードでもリアルモードでも、
 //   セグメントディスクリプターキャッシュ内のbase addressに対して行う
@@ -97,7 +73,32 @@ void CPU::reset() {
 	flag8 = 0;
 }
 
-void CPU::prt_post_op(u8 n) {
+#ifdef CORE_DAS // CORE_DAS stands for cpu CORE DisASsembler
+/*
+  以下の様なレジスタの状態を出力する
+eax:b6f90000 ecx:bea69328 edx:123431cc ebx:85f4d995   eflags:00000000
+esp:000002de ebp:b6f7b498 esi:b6f9eb58 edi:bea69340
+cs:fc00 ds:0000 es:0000 ss:0000 fs:0000 gs:0000
+*/
+void CPU::DAS_dump_reg() {
+	int i;
+
+	for (i = 0; i < 4; i++) {
+		printf("%s:%08x ", genreg_name[2][i], genreg32(i));
+	}
+	printf("  eflags:%08x", flag8);
+	printf("\n");
+	for (i = 4; i < NR_GENREG; i++) {
+		printf("%s:%08x ", genreg_name[2][i], genreg32(i));
+	}
+	printf("\n");
+	for (i = 0; i < NR_SEGREG; i++) {
+		printf("%s:%04x ", segreg_name[i], segreg[i]);
+	}
+	printf("\n\n");
+}
+
+void CPU::DAS_prt_post_op(u8 n) {
 	int i;
 	for (i = 0; i < n; i++)
 		printf(" %02x", mem->read8(get_seg_adr(CS, ip + i)));
@@ -106,7 +107,7 @@ void CPU::prt_post_op(u8 n) {
 }
 
 // modR/Mに続くディスプレースメントのバイト数を返す
-u8 CPU::nr_disp_modrm(u8 modrm) {
+u8 CPU::DAS_nr_disp_modrm(u8 modrm) {
 	u8 mod, rm;
 
 	mod = modrm >> 6;
@@ -122,6 +123,59 @@ u8 CPU::nr_disp_modrm(u8 modrm) {
 
 	return 0;
 }
+
+// リアルモード動作の場合
+// isReg: mod reg R/M の reg が存在するか
+// isDest: mod reg R/M の reg がDestinationになるか
+// isWord: ワード転送かバイト転送か
+void CPU::DAS_modrm16(u8 modrm, bool isReg, bool isDest, bool isWord) {
+	u8 mod, reg, rm;
+#define NR_RM 8
+	char str[NR_RM][9] = {"[BX + SI", "[BX + DI", "[BP + SI", "[BP + DI", "[SI", "[DI", "[BP", "[BX", };
+	char s[] = " + 0x????";
+
+	if (isReg && isDest) {
+		reg = modrm >> 3 & 7;
+		printf("%s, ", genreg_name[isWord][reg]);
+	}
+	mod = modrm >> 6;
+	rm = modrm & 7;
+
+	if (mod == 3) {
+		printf("%s%s", genreg_name[isWord][rm], isDest?"\n\n":", ");
+		return;
+	}
+
+	printf("%s ptr ", isWord?"word":"byte");
+
+	if (rm == 6 && mod == 0) {
+		printf("[0x%04x]%s", mem->read16(get_seg_adr(CS, ip + 1)), isDest?"\n\n":", ");
+		return;
+	}
+
+	if (mod == 1) {
+		sprintf(s, " + 0x%02x", mem->read8(get_seg_adr(CS, ip + 1)));
+	} else if (mod == 2) {
+		sprintf(s, " + 0x%04x", mem->read16(get_seg_adr(CS, ip + 1)));
+	} else {
+		s[0] = '\0';
+	}
+	printf("%s%s]%s", str[rm], s, isDest?"\n\n":", ");
+
+	if (isReg && !isDest) {
+		reg = modrm >> 3 & 7;
+		printf(", %s", genreg_name[isWord][reg]);
+	}
+}
+
+#define DAS_pr(...) printf(__VA_ARGS__)
+#else
+#define DAS_dump_reg()
+#define DAS_prt_post_op(n)
+#define DAS_nr_disp_modrm(m)
+#define DAS_modrm16(m, isR, isD, isW)
+#define DAS_pr(...)
+#endif // CORE_DAS
 
 u16 CPU::modrm16_sub(u8 modrm)
 {
@@ -190,74 +244,27 @@ u8 CPU::modrm16b(u8 modrm)
 	return mem->read8(get_seg_adr(DS, modrm16_sub(modrm)));
 }
 
-// リアルモード動作の場合
-// isReg: mod reg R/M の reg が存在するか
-// isDest: mod reg R/M の reg がDestinationになるか
-// isWord: ワード転送かバイト転送か
-void CPU::disas_modrm16(u8 modrm, bool isReg, bool isDest, bool isWord) {
-	u8 mod, reg, rm;
-#define NR_RM 8
-	char str[NR_RM][9] = {"[BX + SI", "[BX + DI", "[BP + SI", "[BP + DI", "[SI", "[DI", "[BP", "[BX", };
-	char s[] = " + 0x????";
-
-	if (isReg && isDest) {
-		reg = modrm >> 3 & 7;
-		printf("%s, ", genreg_name[isWord][reg]);
-	}
-	mod = modrm >> 6;
-	rm = modrm & 7;
-
-	if (mod == 3) {
-		printf("%s%s", genreg_name[isWord][rm], isDest?"\n\n":", ");
-		return;
-	}
-
-	printf("%s ptr ", isWord?"word":"byte");
-
-	if (rm == 6 && mod == 0) {
-		printf("[0x%04x]%s", mem->read16(get_seg_adr(CS, ip + 1)), isDest?"\n\n":", ");
-		return;
-	}
-
-	if (mod == 1) {
-		sprintf(s, " + 0x%02x", mem->read8(get_seg_adr(CS, ip + 1)));
-	} else if (mod == 2) {
-		sprintf(s, " + 0x%04x", mem->read16(get_seg_adr(CS, ip + 1)));
-	} else {
-		s[0] = '\0';
-	}
-	printf("%s%s]%s", str[rm], s, isDest?"\n\n":", ");
-
-	if (isReg && !isDest) {
-		reg = modrm >> 3 & 7;
-		printf(", %s", genreg_name[isWord][reg]);
-	}
-}
-
 void CPU::exec() {
 	u8 op, subop;
 //	u8 arg1, arg2, tmp1;
 	u8 tmp8;
 	u16 tmp16, warg1, warg2;
 	u8 modrm, rm;
-#ifdef CORE_DBG
+#ifdef CORE_DAS
 	char str8x[8][4] = {"ADD", "", "ADC", "SBB", "", "SUB", "", "CMP"};
 #endif
-	dump_reg();
+	DAS_dump_reg();
 	op = mem->read8(get_seg_adr(CS, ip++));
-#ifdef CORE_DBG
-	printf("%08x %02x", get_seg_adr(CS, ip - 1), op);
-#endif
+	DAS_pr("%08x %02x", get_seg_adr(CS, ip - 1), op);
+
 	switch (op) {
 	case 0x00:
 		break;
 
 /******************** PUSH ********************/
 	case 0x1e: // PUSH DS
-#ifdef CORE_DBG
-		prt_post_op(0);
-		printf("PUSH DS\n\n");
-#endif
+		DAS_prt_post_op(0);
+		DAS_pr("PUSH DS\n\n");
 		mem->write16(get_seg_adr(SS, --sp), segreg[DS]);
 		break;
 /******************** AND ********************/
@@ -272,11 +279,9 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	case 0x22: // AND r8, r/m8
 		modrm = mem->read8(get_seg_adr(CS, ip));
 		rm = modrm & 7;
-#ifdef CORE_DBG
-		prt_post_op(nr_disp_modrm(modrm) + 1);
-		printf("AND ");
-		disas_modrm16(modrm, true, true, false);
-#endif
+		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
+		DAS_pr("AND ");
+		DAS_modrm16(modrm, true, true, false);
 		tmp8 = *genreg8[rm];
 		tmp8 &= modrm16b(modrm);
 		*genreg8[rm] = tmp8;
@@ -293,19 +298,15 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
  */
 	case 0x24: // and al, imm8
-#ifdef CORE_DBG
-		prt_post_op(1);
-		printf("AND AL, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
-#endif
+		DAS_prt_post_op(1);
+		DAS_pr("AND AL, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
 		al &= mem->read8(get_seg_adr(CS, ip++));
 		flag8 = flag_calb[al];
 		flagu8 &= OFCLR8;
 		break;
 	case 0x25: // AND AX, imm16 (AND EAX, imm32)
-#ifdef CORE_DBG
-		prt_post_op(2);
-		printf("AND AX, 0x%02x\n\n", mem->read16(get_seg_adr(CS, ip)));
-#endif
+		DAS_prt_post_op(2);
+		DAS_pr("AND AX, 0x%02x\n\n", mem->read16(get_seg_adr(CS, ip)));
 		ax &= mem->read16(get_seg_adr(CS, ip));
 		flag8 = flag_calw[ax];
 		flagu8 &= OFCLR8;
@@ -323,11 +324,9 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	case 0x32: // XOR.b reg, modR/M
 		modrm = mem->read8(get_seg_adr(CS, ip));
 		rm = modrm & 7;
-#ifdef CORE_DBG
-		prt_post_op(nr_disp_modrm(modrm) + 1);
-		printf("XOR ");
-		disas_modrm16(modrm, true, true, false);
-#endif
+		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
+		DAS_pr("XOR ");
+		DAS_modrm16(modrm, true, true, false);
 		tmp8 = *genreg8[rm];
 		tmp8 ^= modrm16b(modrm);
 		*genreg8[rm] = tmp8;
@@ -339,11 +338,9 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	case 0x33: // XOR.w reg, modR/M
 		modrm = mem->read8(get_seg_adr(CS, ip));
 		rm = modrm & 7;
-#ifdef CORE_DBG
-		prt_post_op(nr_disp_modrm(modrm) + 1);
-		printf("XOR ");
-		disas_modrm16(modrm, true, true, true);
-#endif
+		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
+		DAS_pr("XOR ");
+		DAS_modrm16(modrm, true, true, true);
 		tmp16 = genreg16(rm);
 		tmp16 ^= modrm16w(modrm);
 		genreg16(rm) = tmp16;
@@ -353,10 +350,8 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		break;
 
 	case 0x75: // JNE, imm8
-#ifdef CORE_DBG
-		prt_post_op(1);
-		printf("JNE 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
-#endif
+		DAS_prt_post_op(1);
+		DAS_pr("JNE 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
 		if (flag8 & ZF) { // xxx マイナスの時の考慮必要
 			ip += mem->read8(get_seg_adr(CS, ip));
 		} else {
@@ -376,12 +371,10 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		//w-bit 1なのでワード動作、s-bit 0なので即値は byte
 		modrm = mem->read8(get_seg_adr(CS, ip));
 		subop = modrm >> 3 & 7;
-#ifdef CORE_DBG
-		prt_post_op(nr_disp_modrm(modrm) + 2);
-		printf("%s ", str8x[subop]);
-		disas_modrm16(modrm, false, false, true);
-		printf("0x%02x\n\n", mem->read8(get_seg_adr(CS, ip + 1)));
-#endif
+		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 2);
+		DAS_pr("%s ", str8x[subop]);
+		DAS_modrm16(modrm, false, false, true);
+		DAS_pr("0x%02x\n\n", mem->read8(get_seg_adr(CS, ip + 1)));
 		// xxx SUB DX, imm8 のみ実装
 		switch (subop) {
 		case 5: // SUB
@@ -402,21 +395,17 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
  */
 	case 0x8a: // mov.b reg, modR/M
 		modrm = mem->read8(get_seg_adr(CS, ip)); // modR/Mを読み込む
-#ifdef CORE_DBG
-		prt_post_op(nr_disp_modrm(modrm) + 1);
-		printf("MOV ");
-		disas_modrm16(modrm, true, true, false);
-#endif
+		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
+		DAS_pr("MOV ");
+		DAS_modrm16(modrm, true, true, false);
 		ip++;
 		*genreg8[modrm >> 3 & 3] = modrm16b(modrm);
 		break;
 	case 0x8b: // mov.w reg, modR/M
 		modrm = mem->read8(get_seg_adr(CS, ip)); // modR/Mを読み込む
-#ifdef CORE_DBG
-		prt_post_op(nr_disp_modrm(modrm) + 1);
-		printf("MOV ");
-		disas_modrm16(modrm, true, true, true);
-#endif
+		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
+		DAS_pr("MOV ");
+		DAS_modrm16(modrm, true, true, true);
 		ip++;
 		genreg16(modrm >> 3 & 3) = modrm16w(modrm);
 		break;
@@ -427,10 +416,8 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 +--------+--------+
  */
 	case 0xa8: // test al, imm8
-#ifdef CORE_DBG
-		prt_post_op(1);
-		printf("TEST al, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
-#endif
+		DAS_prt_post_op(1);
+		DAS_pr("TEST AL, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
 		tmp16 = al | mem->read8(get_seg_adr(CS, ip++));
 		flag8 = flag_calb[tmp16];
 
@@ -456,10 +443,8 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	case 0xb6: // MOV DH, imm8
 		// go through
 	case 0xb7: // MOV BH, imm8
-#ifdef CORE_DBG
-		prt_post_op(1);
-		printf("MOV %s, 0x%02x\n\n", genreg_name[0][op & 7], mem->read8(get_seg_adr(CS, ip)));
-#endif
+		DAS_prt_post_op(1);
+		DAS_pr("MOV %s, 0x%02x\n\n", genreg_name[0][op & 7], mem->read8(get_seg_adr(CS, ip)));
 		*genreg8[op & 7] = mem->read8(get_seg_adr(CS, ip++));
 		break;
 	case 0xb8: // MOV AX, imm16
@@ -477,25 +462,19 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	case 0xbe: // MOV SI, imm16
 		// go through
 	case 0xbf: // MOV DI, imm16
-#ifdef CORE_DBG
-		prt_post_op(2);
-		printf("MOV %s, 0x%04x\n\n", genreg_name[1][op & 7], mem->read16(get_seg_adr(CS, ip)));
-#endif
+		DAS_prt_post_op(2);
+		DAS_pr("MOV %s, 0x%04x\n\n", genreg_name[1][op & 7], mem->read16(get_seg_adr(CS, ip)));
 		genreg16(op & 7) = mem->read16(get_seg_adr(CS, ip));
 		ip += 2;
 		break;
 
 	case 0xea: // セグメント外直接ジャンプ
-#ifdef CORE_DBG
-		prt_post_op(4);
-#endif
+		DAS_prt_post_op(4);
 		warg1 = mem->read16(get_seg_adr(CS, ip));
 		warg2 = mem->read16(get_seg_adr(CS, ip + 2));
 		update_segreg(CS, warg2);
 		ip = warg1;
-#ifdef CORE_DBG
-		printf("JMP %04x:%04x\n\n", warg2, warg1);
-#endif
+		DAS_pr("JMP %04x:%04x\n\n", warg2, warg1);
 		break;
 
 /******************** IN/OUT ********************/
@@ -505,17 +484,13 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 +--------+--------+
  */
 	case 0xe4: // IN AL, imm8
-#ifdef CORE_DBG
-		prt_post_op(1);
-		printf("IN AL, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
-#endif
+		DAS_prt_post_op(1);
+		DAS_pr("IN AL, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
 		al = io->read8(mem->read8(get_seg_adr(CS, ip++)));
 		break;
 	case 0xe5: // IN AX, imm8 (xxx IN EAX, imm8)
-#ifdef CORE_DBG
-		prt_post_op(1);
-		printf("IN AX, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
-#endif
+		DAS_prt_post_op(1);
+		DAS_pr("IN AX, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
 		ax = io->read16(mem->read8(get_seg_adr(CS, ip++)));
 		break;
 
@@ -525,17 +500,13 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 +--------+--------+
  */
 	case 0xe6: // OUT imm8, AL
-#ifdef CORE_DBG
-		prt_post_op(1);
-		printf("OUT 0x%02x, AL\n\n", mem->read8(get_seg_adr(CS, ip)));
-#endif
+		DAS_prt_post_op(1);
+		DAS_pr("OUT 0x%02x, AL\n\n", mem->read8(get_seg_adr(CS, ip)));
 		io->write8(mem->read8(get_seg_adr(CS, ip++)), al);
 		break;
 	case 0xe7: // OUT imm8, AX
-#ifdef CORE_DBG
-		prt_post_op(1);
-		printf("OUT 0x%02x, AX\n\n", mem->read8(get_seg_adr(CS, ip)));
-#endif
+		DAS_prt_post_op(1);
+		DAS_pr("OUT 0x%02x, AX\n\n", mem->read8(get_seg_adr(CS, ip)));
 		io->write16(mem->read8(get_seg_adr(CS, ip++)), ax);
 		break;
 
@@ -545,17 +516,13 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 +--------+
  */
 	case 0xec: // IN AL, DX
-#ifdef CORE_DBG
-		prt_post_op(0);
-		printf("IN AL, DX\n\n");
-#endif
+		DAS_prt_post_op(0);
+		DAS_pr("IN AL, DX\n\n");
 		al = io->read8(dx);
 		break;
 	case 0xed: // IN AX, DX (xxx IN EAX, DX)
-#ifdef CORE_DBG
-		prt_post_op(0);
-		printf("IN AX, DX\n\n");
-#endif
+		DAS_prt_post_op(0);
+		DAS_pr("IN AX, DX\n\n");
 		ax = io->read16(dx);
 		break;
 
@@ -565,17 +532,13 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 +--------+
  */
 	case 0xee: // OUT DX, AL
-#ifdef CORE_DBG
-		prt_post_op(0);
-		printf("OUT DX, AL\n\n");
-#endif
+		DAS_prt_post_op(0);
+		DAS_pr("OUT DX, AL\n\n");
 		io->write8(dx, al);
 		break;
 	case 0xef: // OUT DX, AX
-#ifdef CORE_DBG
-		prt_post_op(0);
-		printf("OUT DX, AX\n\n");
-#endif
+		DAS_prt_post_op(0);
+		DAS_pr("OUT DX, AX\n\n");
 		io->write16(dx, ax);
 		break;
 
@@ -585,10 +548,8 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 +--------+--------+
  */
 	case 0xeb: //無条件ジャンプ/セグメントショート内直接
-#ifdef CORE_DBG
-		prt_post_op(1);
-		printf("JMP 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
-#endif
+		DAS_prt_post_op(1);
+		DAS_pr("JMP 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
 		// xxx マイナスの時の考慮必要
 		ip += mem->read8(get_seg_adr(CS, ip)) + 1;
 		break;

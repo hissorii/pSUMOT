@@ -4,7 +4,7 @@ TARGET = psumot
 CXXFLAGS += -Wall
 
 # for core debugging
-CXXFLAGS += -DCORE_DBG
+CXXFLAGS += -DCORE_DAS
 
 
 OBJS = main.o cpu.o memory.o io.o bus.o
