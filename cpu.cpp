@@ -49,15 +49,15 @@ u32 CPU::get_seg_adr(const SEGREG seg, const u16 a) {
 	return sdcr[seg].base + a;
 }
 
-void CPU::update_segreg(const SEGREG seg, const u16 n) {
+void CPU::update_segreg(const u8 seg, const u16 n) {
 	// リアルモードでは、SDCRのbaseを更新するだけ
 	segreg[seg] = n;
 	sdcr[seg].base = segreg[seg] << 4;
 }
 
 void CPU::reset() {
+	for (int i = 0; i < NR_SEGREG; i++) segreg[i] = 0x0000;
 	segreg[CS] = 0xf000;
-	for (int i = DS; i <= GS; i++) segreg[i] = 0x0000;
 	ip = 0xfff0;
 	edx = 0x12345678; // xxxなんか入れないとだめみたい
 	/*
@@ -86,7 +86,7 @@ void CPU::DAS_dump_reg() {
 	for (i = 0; i < 4; i++) {
 		printf("%s:%08x ", genreg_name[2][i], genreg32(i));
 	}
-	printf("  eflags:%08x", flag8);
+	printf("  eflags:%08x", (u16)flagu8 << 8 | flag8);
 	printf("\n");
 	for (i = 4; i < NR_GENREG; i++) {
 		printf("%s:%08x ", genreg_name[2][i], genreg32(i));
@@ -231,7 +231,7 @@ u16 CPU::modrm16_sub(u8 modrm)
 u16 CPU::modrm16w(u8 modrm)
 {
 	if (modrm >> 6 == 3) {
-		return genreg16(modrm & 7);
+		return genregw(modrm & 7);
 	}
 	return mem->read16(get_seg_adr(DS, modrm16_sub(modrm)));
 }
@@ -239,17 +239,35 @@ u16 CPU::modrm16w(u8 modrm)
 u8 CPU::modrm16b(u8 modrm)
 {
 	if (modrm >> 6 == 3) {
-		return *genreg8[modrm & 7];
+		return *genregb[modrm & 7];
 	}
 	return mem->read8(get_seg_adr(DS, modrm16_sub(modrm)));
 }
 
+#define bISWORD false
+#define wISWORD true
+// LOGical OPeration (OP r, r/m)
+#define LOGOP_R_RM(op, str, bwd)			\
+	modrm = mem->read8(get_seg_adr(CS, ip));	\
+	rm = modrm & 7;					\
+	DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);	\
+	DAS_pr(#str" ");				\
+	DAS_modrm16(modrm, true, true, bwd##ISWORD);	\
+	tmp##bwd = genreg##bwd(rm);			\
+	tmp##bwd op##= modrm16##bwd(modrm);		\
+	genreg##bwd(rm) = tmp##bwd;			\
+	flag8 = flag_cal##bwd[tmp##bwd];		\
+	flagu8 &= OFCLR8;				\
+	ip++;
+
 void CPU::exec() {
 	u8 op, subop;
 //	u8 arg1, arg2, tmp1;
-	u8 tmp8;
 	u16 tmp16, warg1, warg2;
-	u8 modrm, rm;
+	u8 modrm, rm, sreg;
+	u8 tmpb;
+	u16 tmpw;
+
 #ifdef CORE_DAS
 	char str8x[8][4] = {"ADD", "", "ADC", "SBB", "", "SUB", "", "CMP"};
 #endif
@@ -261,12 +279,45 @@ void CPU::exec() {
 	case 0x00:
 		break;
 
-/******************** PUSH ********************/
-	case 0x1e: // PUSH DS
-		DAS_prt_post_op(0);
-		DAS_pr("PUSH DS\n\n");
-		mem->write16(get_seg_adr(SS, --sp), segreg[DS]);
+/******************** OR ********************/
+/*
++--------+-----------+---------+---------+
+|000010dw|mod reg r/m|(DISP-LO)|(DISP-HI)|
++--------+-----------+---------+---------+
+OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
+ */
+
+	case 0x08: // OR r/m8, r8
 		break;
+	case 0x09: // OR r/m16, r16
+		break;
+	case 0x0a: // OR r8, r/m8
+		LOGOP_R_RM(|, OR, b);
+		break;
+	case 0x0b: // OR r16, r/m16 (OR r32, r/m32)
+		LOGOP_R_RM(|, OR, w);
+		break;
+
+/******************** PUSH ********************/
+#define PUSH_SEG(seg)	\
+		DAS_prt_post_op(0);					\
+		DAS_pr("PUSH "#seg"\n\n");				\
+		sp -= 2;						\
+		mem->write16(get_seg_adr(SS, sp), segreg[seg]);
+
+	case 0x0e: // PUSH CS
+		PUSH_SEG(CS);
+		break;
+	case 0x16: // PUSH SS
+		PUSH_SEG(SS);
+		break;
+	case 0x1e: // PUSH DS
+		PUSH_SEG(DS);
+		break;
+	case 0x06: // PUSH ES
+		PUSH_SEG(ES);
+		break;
+
 /******************** AND ********************/
 /*
 +--------+-----------+---------+---------+
@@ -274,22 +325,14 @@ void CPU::exec() {
 +--------+-----------+---------+---------+
 OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
  */
+
 	case 0x20: // AND r/m8, r8
 	case 0x21: // AND r/m16, r16
 	case 0x22: // AND r8, r/m8
-		modrm = mem->read8(get_seg_adr(CS, ip));
-		rm = modrm & 7;
-		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
-		DAS_pr("AND ");
-		DAS_modrm16(modrm, true, true, false);
-		tmp8 = *genreg8[rm];
-		tmp8 &= modrm16b(modrm);
-		*genreg8[rm] = tmp8;
-		flag8 = flag_calb[tmp8];
-		flagu8 &= OFCLR8;
-		ip++;
+		LOGOP_R_RM(&, AND, b);
 		break;
 	case 0x23: // AND r16, r/m16 (AND r32, r/m32)
+		LOGOP_R_RM(&, AND, w);
 		break;
 /*
 +--------+--------+-------------+
@@ -313,50 +356,69 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		ip += 2;
 		break;
 
+/******************** XOR ********************/
 /*
-XOR
           76  543 210
 +--------+-----------+---------+---------+
 |001100dw|mod reg r/m|(DISP-LO)|(DISP-HI)|
 +--------+-----------+---------+---------+
 OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
  */
-	case 0x32: // XOR.b reg, modR/M
-		modrm = mem->read8(get_seg_adr(CS, ip));
-		rm = modrm & 7;
-		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
-		DAS_pr("XOR ");
-		DAS_modrm16(modrm, true, true, false);
-		tmp8 = *genreg8[rm];
-		tmp8 ^= modrm16b(modrm);
-		*genreg8[rm] = tmp8;
-		flag8 = flag_calb[tmp8];
-		flagu8 &= OFCLR8;
-		ip++;
+
+	case 0x32: // XOR r8, r/m8
+		LOGOP_R_RM(^, XOR, b);
 		break;
 
-	case 0x33: // XOR.w reg, modR/M
-		modrm = mem->read8(get_seg_adr(CS, ip));
-		rm = modrm & 7;
-		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
-		DAS_pr("XOR ");
-		DAS_modrm16(modrm, true, true, true);
-		tmp16 = genreg16(rm);
-		tmp16 ^= modrm16w(modrm);
-		genreg16(rm) = tmp16;
-		flag8 = flag_calw[tmp16];
-		flagu8 &= OFCLR8;
-		ip++;
+	case 0x33: // XOR r16, r/m16 (xxx XOR r32, r/m32)
+		LOGOP_R_RM(^, XOR, w);
 		break;
 
 	case 0x75: // JNE, imm8
 		DAS_prt_post_op(1);
 		DAS_pr("JNE 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
-		if (flag8 & ZF) { // xxx マイナスの時の考慮必要
-			ip += mem->read8(get_seg_adr(CS, ip));
+		if (!(flag8 & ZF)) { // xxx マイナスの時の考慮必要
+			ip += mem->read8(get_seg_adr(CS, ip)) + 1;
 		} else {
 			ip++;
 		}
+		break;
+
+/******************** INC ********************/
+/*
+CF:影響なし, OF/SF/ZF/PF:結果による, AF:不定
+ */
+#define INC_R16(reg) \
+	DAS_prt_post_op(0);			\
+	DAS_pr("INC %s\n\n", #reg);		\
+	tmp16 = reg;				\
+	reg++;					\
+	flag8 &= CF; /* CF以外はリセット*/	\
+	flag8 |= flag_calw[reg];		\
+	flag8 |= (tmp16 ^ reg) & AF;
+
+	case 0x40: // INC AX (INC EAX)
+		INC_R16(ax);
+		break;
+	case 0x41: // INC CX (INC ECX)
+		INC_R16(cx);
+		break;
+	case 0x42: // INC DX (INC EDX)
+		INC_R16(dx);
+		break;
+	case 0x43: // INC BX (INC EBX)
+		INC_R16(bx);
+		break;
+	case 0x44: // INC SP (INC ESP)
+		INC_R16(sp);
+		break;
+	case 0x45: // INC BP (INC EBP)
+		INC_R16(bp);
+		break;
+	case 0x46: // INC SI (INC ESI)
+		INC_R16(si);
+		break;
+	case 0x47: // INC DI (INC EDI)
+		INC_R16(di);
 		break;
 
 /*
@@ -379,7 +441,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		switch (subop) {
 		case 5: // SUB
 			if (modrm >> 6 == 3) {
-				genreg16(modrm & 7) -= mem->read8(get_seg_adr(CS, ++ip));
+				genregw(modrm & 7) -= mem->read8(get_seg_adr(CS, ++ip));
 				ip++;
 			} else {
 				// xxx
@@ -393,21 +455,52 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 |100010dw|mod reg r/m|(DISP-LO)|(DISP-HI)|
 +--------+-----------+---------+---------+
  */
-	case 0x8a: // mov.b reg, modR/M
+	case 0x8a: // MOV r8, r/m8
 		modrm = mem->read8(get_seg_adr(CS, ip)); // modR/Mを読み込む
 		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
 		DAS_pr("MOV ");
 		DAS_modrm16(modrm, true, true, false);
 		ip++;
-		*genreg8[modrm >> 3 & 3] = modrm16b(modrm);
+		*genregb[modrm >> 3 & 3] = modrm16b(modrm);
 		break;
-	case 0x8b: // mov.w reg, modR/M
+	case 0x8b: // MOV r16, r/m16 (MOV r32, r/m32)
 		modrm = mem->read8(get_seg_adr(CS, ip)); // modR/Mを読み込む
 		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
 		DAS_pr("MOV ");
 		DAS_modrm16(modrm, true, true, true);
 		ip++;
-		genreg16(modrm >> 3 & 3) = modrm16w(modrm);
+		genregw(modrm >> 3 & 3) = modrm16w(modrm);
+		break;
+/*
+          76  543 210
++--------+-----------+---------+---------+
+|10001100|mod 0SR r/m|(DISP-LO)|(DISP-HI)|
++--------+-----------+---------+---------+
+ */
+	case 0x8c: // MOV r/m16, Sreg
+		modrm = mem->read8(get_seg_adr(CS, ip)); // modR/Mを読み込む
+		sreg = modrm >> 3 & 3;
+		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
+		DAS_pr("MOV ");
+		DAS_modrm16(modrm, false, false, true);
+		DAS_pr("%s\n\n", segreg_name[sreg]);
+		ip++;
+		segreg[sreg] = modrm16w(modrm); // xxx srcとdestが逆
+		break;
+/*
+          76  543 210
++--------+-----------+---------+---------+
+|10001110|mod 0SR r/m|(DISP-LO)|(DISP-HI)|
++--------+-----------+---------+---------+
+ */
+	case 0x8e: // MOV Sreg, r/m16
+		modrm = mem->read8(get_seg_adr(CS, ip)); // modR/Mを読み込む
+		sreg = modrm >> 3 & 3;
+		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
+		DAS_pr("MOV %s, ", segreg_name[sreg]);
+		DAS_modrm16(modrm, false, true, true);
+		ip++;
+		update_segreg(sreg, modrm16w(modrm)); // セグメントはbaseも更新
 		break;
 
 /*
@@ -420,7 +513,6 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		DAS_pr("TEST AL, 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
 		tmp16 = al | mem->read8(get_seg_adr(CS, ip++));
 		flag8 = flag_calb[tmp16];
-
 		break;
 /*
  76543 210
@@ -445,7 +537,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	case 0xb7: // MOV BH, imm8
 		DAS_prt_post_op(1);
 		DAS_pr("MOV %s, 0x%02x\n\n", genreg_name[0][op & 7], mem->read8(get_seg_adr(CS, ip)));
-		*genreg8[op & 7] = mem->read8(get_seg_adr(CS, ip++));
+		*genregb[op & 7] = mem->read8(get_seg_adr(CS, ip++));
 		break;
 	case 0xb8: // MOV AX, imm16
 		// go through
@@ -464,17 +556,31 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	case 0xbf: // MOV DI, imm16
 		DAS_prt_post_op(2);
 		DAS_pr("MOV %s, 0x%04x\n\n", genreg_name[1][op & 7], mem->read16(get_seg_adr(CS, ip)));
-		genreg16(op & 7) = mem->read16(get_seg_adr(CS, ip));
+		genregw(op & 7) = mem->read16(get_seg_adr(CS, ip));
 		ip += 2;
 		break;
 
-	case 0xea: // セグメント外直接ジャンプ
+/******************** Rotate/Shift ********************/
+
+	case 0xc0:
 		DAS_prt_post_op(4);
-		warg1 = mem->read16(get_seg_adr(CS, ip));
-		warg2 = mem->read16(get_seg_adr(CS, ip + 2));
-		update_segreg(CS, warg2);
-		ip = warg1;
-		DAS_pr("JMP %04x:%04x\n\n", warg2, warg1);
+		modrm = mem->read8(get_seg_adr(CS, ip));
+		subop = modrm >> 3 & 7;
+		switch (subop) {
+		// C0 /5 ib
+		case 0x5: // SHR r/m8, imm8
+			printf("hogehoge");
+			break;
+		}
+		break;
+
+/******************** RET ********************/
+
+	case 0xc3: // RET
+		DAS_prt_post_op(0);
+		DAS_pr("RET\n\n");
+		ip = mem->read16(get_seg_adr(SS, sp));
+		sp += 2;
 		break;
 
 /******************** IN/OUT ********************/
@@ -542,6 +648,28 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		io->write16(dx, ax);
 		break;
 
+/******************** CALL ********************/
+
+	case 0xe8: // CALL rel16
+		DAS_prt_post_op(2);
+		warg1 = mem->read16(get_seg_adr(CS, ip));
+		ip += 2;
+		DAS_pr("CALL 0x%04x\n\n", warg1);
+		sp -= 2;
+		mem->write16(get_seg_adr(SS, sp), ip);
+		ip += warg1; // xxx マイナスを要考慮
+		break;
+		
+/******************** JMP ********************/
+
+	case 0xea: // セグメント外直接ジャンプ
+		DAS_prt_post_op(4);
+		warg1 = mem->read16(get_seg_adr(CS, ip));
+		warg2 = mem->read16(get_seg_adr(CS, ip + 2));
+		update_segreg(CS, warg2);
+		ip = warg1;
+		DAS_pr("JMP %04x:%04x\n\n", warg2, warg1);
+		break;
 /*
 +--------+--------+
 |11101011|IP-INC8 |
@@ -553,5 +681,19 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		// xxx マイナスの時の考慮必要
 		ip += mem->read8(get_seg_adr(CS, ip)) + 1;
 		break;
+
+/******************** プロセッサコントロール ********************/
+
+	case 0xfb: // STI
+		DAS_prt_post_op(0);
+		DAS_pr("STI\n\n");
+		flagu8 |= IFSET8;
+		break;
+
+	case 0xff: 
+		DAS_prt_post_op(1);
+		DAS_pr("xxx\n\n");
+		break;
+
 	}
 }

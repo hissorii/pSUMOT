@@ -74,15 +74,15 @@ edi|                |        di       |
 // eax, ecx, edx, ebx, esp ,ebp, esi ,ediの順に取り出す
 #define genreg32(x) (reg[x].reg32)
 // ax, cx, dx, bx, sp, bp, si, diの順に取り出す
-#define genreg16(x) (reg[x].reg16.lower16)
+#define genregw(x) (reg[x].reg16.lower16)
 // ah, ch, dh, bhの順に取り出す
 #define genreg8h(x) (reg[x].reg8.h)
 // al, cl, dl, blの順に取り出す
 #define genreg8l(x) (reg[x].reg8.l)
 #if 0
 // al, cl, dl, bl, ah, ch, dh, bhの順に取り出す
-#define genreg8(x) (x < 4 ? reg[x].reg8.l : reg[x - 4].reg8.h)
-// 高速化のためu8* genreg8[8] = {&al, &cl, &dl, &bl, &ah, &ch, &dh, &bh};にする
+#define genregb(x) (x < 4 ? reg[x].reg8.l : reg[x - 4].reg8.h)
+// 高速化のためu8* genregb[8] = {&al, &cl, &dl, &bl, &ah, &ch, &dh, &bh};にする
 #endif
 
 // とりあえず親クラスはなし
@@ -118,14 +118,15 @@ private:
 		{"EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI"}
 	};
 
+#define genregb(n) *genregb[n]
 	// al, cl, dl, bl, ah, ch, dh, bhの順に取り出す
-	u8* genreg8[8] = {&al, &cl, &dl, &bl, &ah, &ch, &dh, &bh};
+	u8* genregb[8] = {&al, &cl, &dl, &bl, &ah, &ch, &dh, &bh};
 
 // セグメントレジスタ
 #define NR_SEGREG 6
 	u16 segreg[NR_SEGREG];
-	enum SEGREG {CS, DS, ES, SS, FS, GS};
-	char segreg_name[NR_SEGREG][3] = {"cs", "ds", "es", "ss", "fs", "gs"};
+	enum SEGREG {ES, CS, SS, DS, FS, GS};
+	char segreg_name[NR_SEGREG][3] = {"ES", "CS", "SS", "DS", "FS", "GS"};
 
 	/*
 	 * Segment Descriptor Cache Register
@@ -177,7 +178,8 @@ private:
 */
 	enum {CF = 1 << 0, PF = 1 << 2, AF = 1 << 4, ZF = 1 << 6, SF = 1 << 7,
 	      TF = 1 << 8, IF = 1 << 9, DF = 1 << 10, OF = 1 << 11};
-#define OFCLR8 0xf7;
+#define OFCLR8 0xf7; // flagu8のOFをクリアするための数
+#define IFSET8 0x02; // flagu8のIFをセットするための数
 	u8 flag8; // フラグの下位8ビット
 	u16 flagu8; // フラグの上位8ビット(16ビットのうち上位8ビットを使う)
 	u8 flag_calb[0x200]; // 512バイト
@@ -186,7 +188,7 @@ private:
 	BUS *mem, *io;
 
 	u32 get_seg_adr(const SEGREG seg, const u16 a);
-	void update_segreg(const SEGREG seg, const u16 n);
+	void update_segreg(const u8 seg, const u16 n);
 
 #ifdef CORE_DAS
 	void DAS_dump_reg();
