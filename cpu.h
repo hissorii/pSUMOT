@@ -196,7 +196,7 @@ private:
 	u8 DAS_nr_disp_modrm(u8 modrm);
 	void DAS_modrm16(u8 modrm, bool isReg, bool isDest, bool isWord);
 #endif
-	u16 modrm16_sub(u8 modrm);
+	u16 modrm16_ea(u8 modrm);
 	u16 modrm16w(u8 modrm);
 	u8 modrm16b(u8 modrm);
 public:

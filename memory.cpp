@@ -62,6 +62,6 @@ u16 Memory::read16(u32 addr) {
 }
 
 void Memory::write16(u32 addr, u16 data) {
-	*(ram + addr) = data & 8;
+	*(ram + addr) = data & 0xff;
 	*(ram + addr + 1) = data >> 8;
 }
