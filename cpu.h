@@ -178,8 +178,9 @@ private:
 */
 	enum {CF = 1 << 0, PF = 1 << 2, AF = 1 << 4, ZF = 1 << 6, SF = 1 << 7,
 	      TF = 1 << 8, IF = 1 << 9, DF = 1 << 10, OF = 1 << 11};
-#define OFCLR8 0xf7; // flagu8のOFをクリアするための数
-#define IFSET8 0x02; // flagu8のIFをセットするための数
+#define OFCLR8 0xf7 // flagu8のOFをクリアするための数
+#define OFSET8 0x08 // flagu8のOFをセットするための数
+#define IFSET8 0x02 // flagu8のIFをセットするための数
 	u8 flag8; // フラグの下位8ビット
 	u16 flagu8; // フラグの上位8ビット(16ビットのうち上位8ビットを使う)
 	u8 flag_calb[0x200]; // 512バイト

@@ -19,6 +19,6 @@ int main(void)
 #endif
 
 	cpu.reset();
-	for (int i = 0; i < 128; i++)
+	for (int i = 0; i < 350; i++)
 		cpu.exec();
 }
