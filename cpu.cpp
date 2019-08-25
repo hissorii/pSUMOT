@@ -683,197 +683,29 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		DAS_pr("0x%02x\n\n", mem->read8(get_seg_adr(CS, ip + DAS_nr_disp_modrm(modrm) + 1)));
 
 		switch (subop) {
-/*
-フラグ OF/SF/ZF/AF/PF/CF:結果による
- */
 		case 0: // ADD r/m8, imm8
 			CAL_RM_IM(b, b, w, +, u8, 0, 1, , 0x80);
-/*
-			if ((modrm & 0xc0) == 0xc0) {
-				tmpb = genregb(modrm & 7);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpw = tmpb + tmpb2;
-				genregb(modrm & 7) = (u8)tmpw;
-			} else {
-				tmpadr = get_seg_adr(DS, modrm16_ea(modrm));
-				tmpb = mem->read8(tmpadr);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpw = tmpb + tmpb2;
-				mem->write8(tmpadr, (u8)tmpw);
-			}
-			ip++;
-			flag8 = flag_calb[tmpw];
-			flag8 |= (tmpb ^ tmpb2 ^ tmpw) & AF;
-			(tmpw ^ tmpb) & (tmpw ^ tmpb2) & 0x80?
-				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
-*/
 			break;
-/*
-フラグ OF/CF:クリア, SF/ZF/PF:結果による, AF:未定義
- */
 		case 1: // OR r/m8, imm8
 			LOGOP_RM_IM(b, b, |, 1);
-/*
-			if (modrm >> 6 == 3) {
-				tmpb = genregb(modrm & 7);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpb |= tmpb2;
-				genregb(modrm & 7) = tmpb;
-			} else {
-				tmpadr = get_seg_adr(DS, modrm16_ea(modrm));
-				tmpb = mem->read8(tmpadr);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpb |= tmpb2;
-				mem->write8(tmpadr, tmpb);
-			}
-			ip++;
-			flag8 = flag_calb[tmpb];
-			flagu8 &= OFCLR8;
-*/
 			break;
-/*
-フラグ OF/SF/ZF/AF/PF/CF:結果による
- */
 		case 2: // ADC r/m8, imm8
 			CAL_RM_IM(b, b, w, +, u8, (flag8 & CF), 1, , 0x80);
-/*
-			if (modrm >> 6 == 3) {
-				tmpb = genregb(modrm & 7);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpw = tmpb + tmpb2 + (flag8 & CF);
-				genregb(modrm & 7) = (u8)tmpw;
-			} else {
-				tmpadr = get_seg_adr(DS, modrm16_ea(modrm));
-				tmpb = mem->read8(tmpadr);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpw = tmpb + tmpb2 + (flag8 & CF);
-				mem->write8(tmpadr, (u8)tmpw);
-			}
-			ip++;
-			flag8 = flag_calb[tmpw];
-			flag8 |= (tmpb ^ tmpb2 ^ tmpw) & AF;
-			(tmpw ^ tmpb) & (tmpw ^ tmpb2) & 0x80?
-				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
-*/
 			break;
-/*
-フラグ OF/SF/ZF/AF/PF/CF:結果による
- */
 		case 3: // SBB r/m8, imm8
 			CAL_RM_IM(b, b, w, -, u8, -(flag8 & CF), 1, & 0x1ff, 0x80);
-/*
-			if (modrm >> 6 == 3) {
-				tmpb = genregb(modrm & 7);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpw = tmpb - tmpb2 - (flag8 & CF);
-				genregb(modrm & 7) = (u8)tmpw;
-			} else {
-				tmpadr = get_seg_adr(DS, modrm16_ea(modrm));
-				tmpb = mem->read8(tmpadr);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpw = tmpb - tmpb2 - (flag8 & CF);
-				mem->write8(tmpadr, (u8)tmpw);
-			}
-			ip++;
-			flag8 = flag_calb[tmpw & 0x1ff];
-			flag8 |= (tmpb ^ tmpb2 ^ tmpw) & AF;
-			(tmpw ^ tmpb) & (tmpw ^ tmpb2) & 0x80?
-				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
-*/
 			break;
-/*
-フラグ OF/CF:クリア, SF/ZF/PF:結果による, AF:未定義
- */
 		case 4: // AND r/m8, imm8
 			LOGOP_RM_IM(b, b, &, 1);
-/*
-			if (modrm >> 6 == 3) {
-				tmpb = genregb(modrm & 7);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpb &= tmpb2;
-				genregb(modrm & 7) = tmpb;
-			} else {
-				tmpadr = get_seg_adr(DS, modrm16_ea(modrm));
-				tmpb = mem->read8(tmpadr);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpb &= tmpb2;
-				mem->write8(tmpadr, tmpb);
-			}
-			ip++;
-			flag8 = flag_calb[tmpb];
-			flagu8 &= OFCLR8;
-*/
 			break;
-/*
-フラグ OF/SF/ZF/AF/PF/CF:結果による
- */
 		case 5: // SUB r/m8, imm8
 			CAL_RM_IM(b, b, w, -, u8, 0, 1, & 0x1ff, 0x80);
-/*
-			if (modrm >> 6 == 3) {
-				tmpb = genregb(modrm & 7);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpw = tmpb - tmpb2;
-				genregb(modrm & 7) = (u8)tmpw;
-			} else {
-				tmpadr = get_seg_adr(DS, modrm16_ea(modrm));
-				tmpb = mem->read8(tmpadr);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpw = tmpb - tmpb2;
-				mem->write8(tmpadr, (u8)tmpw);
-			}
-			ip++;
-			flag8 = flag_calb[tmpw & 0x1ff];
-			flag8 |= (tmpb ^ tmpb2 ^ tmpw) & AF;
-			(tmpw ^ tmpb) & (tmpw ^ tmpb2) & 0x80?
-				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
-*/
 			break;
-/*
-フラグ OF/CF:クリア, SF/ZF/PF:結果による, AF:未定義
- */
 		case 6: // XOR r/m8, imm8
 			LOGOP_RM_IM(b, b, ^, 1);
-/*
-			if (modrm >> 6 == 3) {
-				tmpb = genregb(modrm & 7);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpb ^= tmpb2;
-				genregb(modrm & 7) = tmpb;
-			} else {
-				tmpadr = get_seg_adr(DS, modrm16_ea(modrm));
-				tmpb = mem->read8(tmpadr);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpb ^= tmpb2;
-				mem->write8(tmpadr, tmpb);
-			}
-			ip++;
-			flag8 = flag_calb[tmpb];
-			flagu8 &= OFCLR8;
-*/
 			break;
-/*
-フラグ OF/SF/ZF/AF/PF/CF:結果による
- */
 		case 7: // CMP r/m8, imm8
 			CMP_RM_IM(b, b, w, 1, & 0x1ff, 0x80);
-/*
-			if ((modrm & 0xc0) == 0xc0) {
-				tmpb = genregb(modrm & 7);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpw = tmpb - tmpb2;
-			} else {
-				tmpadr = get_seg_adr(DS, modrm16_ea(modrm));
-				tmpb = mem->read8(tmpadr);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpw = tmpb - tmpb2;
-			}
-			ip++;
-			flag8 = flag_calb[tmpw & 0x1ff];
-			flag8 |= (tmpb ^ tmpb2 ^ tmpw) & AF;
-			(tmpw ^ tmpb) & (tmpw ^ tmpb2) & 0x80?
-				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
-*/
 			break;
 		}
 		break;
@@ -903,30 +735,8 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		case 4: // AND r/m16, imm16
 			LOGOP_RM_IM(w, w, &, 2);
 			break;
-/*
-フラグ OF/SF/ZF/AF/PF/CF:結果による
- */
 		case 5: // SUB r/m16, imm16
 			CAL_RM_IM(w, w, d, -, u16, 0, 2, & 0x1ffff, 0x8000);
-/*
-			if (modrm >> 6 == 3) {
-				tmpw = genregw(modrm & 7);
-				tmpw2 = mem->read16(get_seg_adr(CS, ++ip));
-				tmpd = tmpw - tmpw2;
-				genregw(modrm & 7) = (u16)tmpd;
-			} else {
-				tmpadr = get_seg_adr(DS, modrm16_ea(modrm));
-				tmpw = mem->read16(tmpadr);
-				tmpw2 = mem->read16(get_seg_adr(CS, ++ip));
-				tmpd = tmpw - tmpw2;
-				mem->write16(tmpadr, (u16)tmpd);
-			}
-			ip += 2;
-			flag8 = flag_calw[tmpd & 0x1ffff];
-			flag8 |= (tmpw ^ tmpw2 ^ tmpd) & AF;
-			(tmpd ^ tmpw) & (tmpd ^ tmpw2) & 0x8000?
-				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
-*/
 			break;
 
 		case 6: // XOR r/m16, imm16
@@ -934,23 +744,6 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 			break;
 		case 7: // CMP r/m16, imm16
 			CMP_RM_IM(w, w, d, 2, & 0x1ffff, 0x8000);
-/*
-			if ((modrm & 0xc0) == 0xc0) {
-				tmpw = genregw(modrm & 7);
-				tmpw2 = mem->read16(get_seg_adr(CS, ++ip));
-				tmpd = tmpw - tmpw2;
-			} else {
-				tmpadr = get_seg_adr(DS, modrm16_ea(modrm));
-				tmpw = mem->read16(tmpadr);
-				tmpw2 = mem->read16(get_seg_adr(CS, ++ip));
-				tmpd = tmpw - tmpw2;
-			}
-			ip += 2;
-			flag8 = flag_calw[tmpd & 0x1ffff];
-			flag8 |= (tmpw ^ tmpw2 ^ tmpd) & AF;
-			(tmpd ^ tmpw) & (tmpd ^ tmpw2) & 0x8000?
-				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
-*/
 			break;
 		}
 		break;
@@ -980,54 +773,14 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		case 4: // AND r/m16, imm8
 			LOGOP_RM_IM(w, b, &, 1);
 			break;
-/*
-フラグ OF/SF/ZF/AF/PF/CF:結果による
- */
 		case 5: // SUB r/m16, imm8
 			CAL_RM_IM(w, b, d, -, u16, 0, 1, & 0x1ffff, 0x8000);
-/*
-			if (modrm >> 6 == 3) {
-				tmpw = genregw(modrm & 7);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpd = tmpw - tmpb2;
-				genregw(modrm & 7) = (u16)tmpd;
-
-			} else {
-				tmpadr = get_seg_adr(DS, modrm16_ea(modrm));
-				tmpw = mem->read16(tmpadr);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpd = tmpw - tmpb2;
-				mem->write16(tmpadr, (u16)tmpd);
-			}
-			ip++;
-			flag8 = flag_calw[tmpd & 0x1ffff];
-			flag8 |= (tmpw ^ tmpb2 ^ tmpd) & AF;
-			(tmpd ^ tmpw) & (tmpd ^ tmpb2) & 0x8000?
-				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
-*/
 			break;
 		case 6: // XOR r/m16, imm8
 			LOGOP_RM_IM(w, b, ^, 1);
 			break;
 		case 7: // CMP r/m16, imm8
 			CMP_RM_IM(w, b, d, 1, & 0x1ffff, 0x8000);
-/*
-			if ((modrm & 0xc0) == 0xc0) {
-				tmpw = genregw(modrm & 7);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpd = tmpw - tmpb2;
-			} else {
-				tmpadr = get_seg_adr(DS, modrm16_ea(modrm));
-				tmpw = mem->read16(tmpadr);
-				tmpb2 = mem->read8(get_seg_adr(CS, ++ip));
-				tmpd = tmpw - tmpb2;
-			}
-			ip += 1;
-			flag8 = flag_calw[tmpd & 0x1ffff];
-			flag8 |= (tmpw ^ tmpb2 ^ tmpd) & AF;
-			(tmpd ^ tmpw) & (tmpd ^ tmpb2) & 0x8000?
-				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
-*/
 			break;
 
 		}
