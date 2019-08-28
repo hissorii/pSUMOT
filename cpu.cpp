@@ -278,6 +278,38 @@ void CPU::exec() {
 #define writew write16
 #define writed write32
 
+/******************** ADD ********************/
+/*
++--------+-----------+---------+---------+
+|000000dw|mod reg r/m|(DISP-LO)|(DISP-HI)|
++--------+-----------+---------+---------+
+OF/SF/ZF/AF/PF/CF:結果による
+ */
+	case 0x01: // ADD r/m16, r16 (ADD r/m32, r32)
+		modrm = mem->read8(get_seg_adr(CS, ip));
+		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
+		DAS_pr("ADD ");
+		DAS_modrm16(modrm, true, false, true);
+		tmpw2 = genregw(modrm >> 3 & 7);
+		if ((modrm & 0xc0) == 0xc0) {
+			tmpw = genregw(modrm & 7);
+			tmpd = tmpw + tmpw2;
+			genregw(modrm & 7) = tmpd;
+		} else {
+			tmpadr = get_seg_adr(DS, modrm16_ea(modrm));
+			tmpw = mem->read16(tmpadr);
+			tmpd = tmpw + tmpw2;
+			mem->write16(tmpadr, (u16)tmpd);
+		}
+		ip++;
+		flag8 = flag_calw[tmpd];
+		flag8 |= (tmpw ^ tmpw2 ^ tmpd) & AF;
+		(tmpd ^ tmpw) & (tmpd ^ tmpw2) & 0x8000?
+			flagu8 |= OFSET8 : flagu8 &= OFCLR8;
+		break;
+
+
+
 /******************** OR ********************/
 /*
 +--------+-----------+---------+---------+
@@ -577,7 +609,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 			DAS_pr("JE/JZ 0x%04x\n\n", tmpw);
 			ip += 2;
 			if (flag8 & ZF) {
-				ip += tmpw; // xxx マイナス
+				ip += (s16)tmpw;
 			}
 			break;
 		}
@@ -586,8 +618,8 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	case 0x74: // JE rel8 or JZ rel8
 		DAS_prt_post_op(1);
 		DAS_pr("JE/JZ 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
-		if ((flag8 & ZF)) { // xxx マイナスの時の考慮必要
-			ip += mem->read8(get_seg_adr(CS, ip)) + 1;
+		if ((flag8 & ZF)) {
+			ip += (s8)mem->read8(get_seg_adr(CS, ip)) + 1;
 		} else {
 			ip++;
 		}
@@ -596,8 +628,18 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	case 0x75: // JNE rel8 or JNZ rel8
 		DAS_prt_post_op(1);
 		DAS_pr("JNE/JNZ 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
-		if (!(flag8 & ZF)) { // xxx マイナスの時の考慮必要
-			ip += mem->read8(get_seg_adr(CS, ip)) + 1;
+		if (!(flag8 & ZF)) {
+			ip += (s8)mem->read8(get_seg_adr(CS, ip)) + 1;
+		} else {
+			ip++;
+		}
+		break;
+
+	case 0x78: // JS rel8
+		DAS_prt_post_op(1);
+		DAS_pr("JS 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
+		if (flag8 & SF) {
+			ip += (s8)mem->read8(get_seg_adr(CS, ip)) + 1;
 		} else {
 			ip++;
 		}
@@ -609,7 +651,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		DAS_pr("JGE/JNL 0x%02x\n\n", tmpb);
 		ip++;
 		if (!((flag8 ^ flagu8 << 4) & 0x80)) { // SF == OF
-			ip += tmpb; // xxx マイナス要考慮
+			ip += (s8)tmpb;
 		}
 		break;
 
@@ -950,6 +992,20 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		ip += 2;
 		break;
 
+/*
+          76  543 210
++--------+-----------+---------+---------+--------+-------------+
+|1100011w|mod 000 r/m|(DISP-LO)|(DISP-HI)|  data  |(data if w=1)|
++--------+-----------+---------+---------+--------+-------------+
+ */
+	case 0xc6: // MOV r/m8, imm8
+		modrm = mem->read8(get_seg_adr(CS, ip));
+		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
+		DAS_pr("MOV ");
+		DAS_modrm16(modrm, false, false, false);
+		DAS_pr("0x%02x\n\n", mem->read8(get_seg_adr(CS, ip + DAS_nr_disp_modrm(modrm) + 1)));
+		break;
+
 /******************** TEST ********************/
 // OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 
@@ -1100,7 +1156,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		ip += 2;
 		DAS_pr("CALL 0x%04x\n\n", warg1);
 		PUSHW(ip);
-		ip += warg1; // xxx マイナスを要考慮
+		ip += (s16)warg1;
 		break;
 /*
 +--------+--------+--------+--------+--------+
@@ -1128,8 +1184,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	case 0xe9: // JMP rel16 (JMP rel32) セグメント内直接ジャンプ
 		DAS_prt_post_op(2);
 		DAS_pr("JMP 0x%04x\n\n", mem->read16(get_seg_adr(CS, ip)));
-		// xxx マイナスの時の考慮必要
-		ip += mem->read16(get_seg_adr(CS, ip)) + 2;
+		ip += (s16)mem->read16(get_seg_adr(CS, ip)) + 2;
 		break;
 
 /*
@@ -1153,8 +1208,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	case 0xeb: //無条件ジャンプ/セグメントショート内直接
 		DAS_prt_post_op(1);
 		DAS_pr("JMP 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
-		// xxx マイナスの時の考慮必要
-		ip += mem->read8(get_seg_adr(CS, ip)) + 1;
+		ip += (s8)mem->read8(get_seg_adr(CS, ip)) + 1;
 		break;
 
 /******************** TEST/DEC/MUL/IMUL/DIV/IDIV/NOT ********************/
