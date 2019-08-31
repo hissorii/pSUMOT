@@ -82,11 +82,13 @@ cs:fc00 ds:0000 es:0000 ss:0000 fs:0000 gs:0000
 */
 void CPU::DAS_dump_reg() {
 	int i;
+	static int step = 1;
 
 	for (i = 0; i < 4; i++) {
 		printf("%s:%08x ", genreg_name[2][i], genreg32(i));
 	}
 	printf("  eflags:%08x", (u16)flagu8 << 8 | flag8);
+	printf("  %4d", step++);
 	printf("\n");
 	for (i = 4; i < NR_GENREG; i++) {
 		printf("%s:%08x ", genreg_name[2][i], genreg32(i));
@@ -97,6 +99,14 @@ void CPU::DAS_dump_reg() {
 		printf("%s:%04x ", segreg_name[i], segreg[i]);
 	}
 	printf("\n\n");
+
+        if (step == 120) {
+                for (i = 0; i < 32; i++) {
+                        printf("0x%02x ", mem->read8(0xf7fb0 + i));
+                        if (((i + 1) % 16) == 0) printf("\n");
+                }
+                printf("\n");
+        }
 }
 
 void CPU::DAS_prt_post_op(u8 n) {
@@ -234,13 +244,68 @@ u16 CPU::modrm16_ea(u8 modrm)
 	return tmp16;
 }
 
+// modが11でないことはあらかじめチェックしておくこと
+// Effective Addressを取得
+// セグメント加算する
+u32 CPU::modrm16_seg_ea(u8 modrm)
+{
+	u16 mod;
+	u32 tmp32;
+
+	mod = modrm >> 6;
+
+	switch (modrm & 7) {
+	case 0:
+		tmp32 = bx + si + sdcr[DS].base;
+		break;
+	case 1:
+		tmp32 = bx + di + sdcr[DS].base;
+		break;
+	case 2:
+		tmp32 = bp + si + sdcr[SS].base;
+		break;
+	case 3:
+		tmp32 = bp + di + sdcr[SS].base;
+		break;
+	case 4:
+		tmp32 = si + sdcr[DS].base;
+		break;
+	case 5:
+		tmp32 = di + sdcr[DS].base;
+		break;
+	case 6:
+		if (mod == 0) {
+			tmp32 = mem->read16(get_seg_adr(CS, ip)) + sdcr[DS].base;
+			ip += 2;
+			break;
+		}
+		tmp32 = bp + sdcr[SS].base;
+		break;
+	case 7:
+		tmp32 = bx + sdcr[DS].base;
+		break;
+	}
+
+	// xxx dispは符号つきなので考慮しなくてはならない
+	if (mod == 1) {
+		tmp32 += mem->read8(get_seg_adr(CS, ip));
+		ip++;
+	} else if (mod == 2) {
+		tmp32 += mem->read16(get_seg_adr(CS, ip));
+		ip += 2;
+	}
+
+	return tmp32;
+}
+
+
 // リアルモードでワード動作の場合
 u16 CPU::modrm16w(u8 modrm)
 {
 	if (modrm >> 6 == 3) {
 		return genregw(modrm & 7);
 	}
-	return mem->read16(get_seg_adr(DS, modrm16_ea(modrm)));
+	return mem->read16(modrm16_seg_ea(modrm));
 }
 
 u8 CPU::modrm16b(u8 modrm)
@@ -248,7 +313,7 @@ u8 CPU::modrm16b(u8 modrm)
 	if (modrm >> 6 == 3) {
 		return *genregb[modrm & 7];
 	}
-	return mem->read8(get_seg_adr(DS, modrm16_ea(modrm)));
+	return mem->read8(modrm16_seg_ea(modrm));
 }
 
 void CPU::exec() {
@@ -296,7 +361,7 @@ OF/SF/ZF/AF/PF/CF:結果による
 			tmpd = tmpw + tmpw2;
 			genregw(modrm & 7) = tmpd;
 		} else {
-			tmpadr = get_seg_adr(DS, modrm16_ea(modrm));
+			tmpadr = modrm16_seg_ea(modrm);
 			tmpw = mem->read16(tmpadr);
 			tmpd = tmpw + tmpw2;
 			mem->write16(tmpadr, (u16)tmpd);
@@ -670,7 +735,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		tmp##BWD3 = tmp##BWD OP tmp##BWD2##2 + CRY;		\
 		genreg##BWD(modrm & 7) = (CAST)tmp##BWD3;		\
 	} else {							\
-		tmpadr = get_seg_adr(DS, modrm16_ea(modrm));		\
+		tmpadr = modrm16_seg_ea(modrm);				\
 		tmp##BWD = mem->read##BWD(tmpadr);			\
 		tmp##BWD2##2 = mem->read##BWD2(get_seg_adr(CS, ++ip));	\
 		tmp##BWD3 = tmp##BWD OP tmp##BWD2##2 + CRY;		\
@@ -689,7 +754,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		tmp##BWD OP##= tmp##BWD2##2;				\
 		genreg##BWD(modrm & 7) = tmp##BWD;			\
 	} else {							\
-		tmpadr = get_seg_adr(DS, modrm16_ea(modrm));		\
+		tmpadr = modrm16_seg_ea(modrm);				\
 		tmp##BWD = mem->read##BWD(tmpadr);			\
 		tmp##BWD2##2 = mem->read##BWD2(get_seg_adr(CS, ++ip));	\
 		tmp##BWD OP##= tmp##BWD2##2;				\
@@ -705,7 +770,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		tmp##BWD2##2 = mem->read##BWD2(get_seg_adr(CS, ++ip));	\
 		tmp##BWD3 = tmp##BWD - tmp##BWD2##2;			\
 	} else {							\
-		tmpadr = get_seg_adr(DS, modrm16_ea(modrm));		\
+		tmpadr = modrm16_seg_ea(modrm);				\
 		tmp##BWD = mem->read##BWD(tmpadr);			\
 		tmp##BWD2##2 = mem->read##BWD2(get_seg_adr(CS, ++ip));	\
 		tmp##BWD3 = tmp##BWD - tmp##BWD2##2;			\
@@ -847,9 +912,9 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 			genregb(modrm & 7) = genregb(modrm >> 3 & 7);
 			genregb(modrm >> 3 & 7) = tmpb;
 		} else {
-			tmpw = modrm16_ea(modrm);
-			tmpb = mem->read8(get_seg_adr(DS, tmpw));
-			mem->write8(get_seg_adr(DS, tmpw), genregb(modrm >> 3 & 7));
+			tmpadr = modrm16_seg_ea(modrm);
+			tmpb = mem->read8(tmpadr);
+			mem->write8(tmpadr, genregb(modrm >> 3 & 7));
 			genregb(modrm >> 3 & 7) = tmpb;
 		}
 		break;
@@ -870,7 +935,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		if ((modrm & 0xc0) == 0xc0) {
 			genregb(modrm & 0x07) = *genregb[modrm >> 3 & 7];
 		} else {
-			mem->write8(get_seg_adr(DS, modrm16_ea(modrm)), *genregb[modrm >> 3 & 7]);
+			mem->write8(modrm16_seg_ea(modrm), *genregb[modrm >> 3 & 7]);
 		}
 		break;
 
@@ -912,7 +977,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		if ((modrm & 0xc0) == 0xc0) {
 			genregw(modrm & 0x07) = segreg[sreg];
 		} else {
-			mem->write16(get_seg_adr(DS, modrm16_ea(modrm)), segreg[sreg]);
+			mem->write16(modrm16_seg_ea(modrm), segreg[sreg]);
 		}
 		break;
 
@@ -1019,7 +1084,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		if ((modrm & 0xc0) == 0xc0) {
 			tmpb = genregb(modrm & 0x07) & genregb(modrm >> 3 & 7);
 		} else {
-			tmpb = mem->read16(get_seg_adr(DS, modrm16_ea(modrm)))
+			tmpb = mem->read16(modrm16_seg_ea(modrm))
 				& genregb(modrm >> 3 & 7);
 		}
 		flag8 = flag_calb[tmpb];
