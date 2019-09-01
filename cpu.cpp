@@ -17,23 +17,22 @@ CPU::CPU(BUS* bus) {
 		pf ^= pf >> 4;
 		pf ^= pf >> 2;
 		pf ^= pf >> 1;
-		pf = pf? 0 : PF;
+		pf = (pf & 1)? 0 : PF;
 		cf = (i & 0x100)? CF : 0;
 		flag_calb[i] = sf | zf | pf | cf;
 	}
 	// ワード同士の演算によるフラグSF/ZF/PF/CFの状態をあらかじめ算出する
 	// キャリーフラグ算出のため、配列長は17ビットである
 	for (int i = 0; i < 0x20000; i++) {
-		u8 sf, zf, cf;
-		u16 pf;
+		u8 sf, zf, pf, cf;
 		sf = (i & 0x8000)? SF : 0;
 		zf = (i == 0)? ZF : 0;
-		pf = i;
+		pf = (u8)(i & 0xff); // パリティは下位8ビットのみチェックする
 		pf ^= pf >> 8;
 		pf ^= pf >> 4;
 		pf ^= pf >> 2;
 		pf ^= pf >> 1;
-		pf = pf? 0 : PF;
+		pf = (pf & 1)? 0 : PF;
 		cf = (i & 0x10000)? CF : 0;
 		flag_calw[i] = sf | zf | pf | cf;
 	}
@@ -59,7 +58,7 @@ void CPU::reset() {
 	for (int i = 0; i < NR_SEGREG; i++) segreg[i] = 0x0000;
 	segreg[CS] = 0xf000;
 	ip = 0xfff0;
-	edx = 0x12345678; // xxxなんか入れないとだめみたい
+	edx = 0x0; // xxxなんか入れないとだめみたい
 	/*
 	  386リセット時は、コードセグメントのセグメントディスクリプタ
 	  キャッシュのセグメントベースが、0xffff0000になっている?
@@ -618,7 +617,7 @@ CF/OF/SF/ZF/AF/PF:結果による
 		ip++;
 		flag8 = flag_calb[tmpw & 0x1ff];
 		flag8 |= (al ^ tmpb ^ tmpw) & AF;
-		(al ^ tmpw) & (tmpb ^ tmpw) & 0x80?
+		(al ^ tmpw) & (al ^ tmpb) & 0x80?
 			flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 		break;
 
@@ -720,6 +719,17 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		}
 		break;
 
+	case 0x7e: // JLE rel8 or JNG rel8
+		DAS_prt_post_op(1);
+		tmpb = mem->read8(get_seg_adr(CS, ip));
+		DAS_pr("JLE/JNG 0x%02x\n\n", tmpb);
+		ip++;
+		 // ZF=1またはSF<>OF
+		if (flag8 & ZF || (flag8 ^ flagu8 << 4) & 0x80) {
+			ip += (s8)tmpb;
+		}
+		break;
+
 /*
           76  543 210
 +--------+-----------+---------+---------+--------+---------------+
@@ -728,7 +738,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 ???(ここではregではなく、opの拡張。これにより以下の様に命令が変わる):
 000:ADD, 001:OR, 010:ADC, 011:SBB, 100:AND, 101:SUB, 110:XOR, 111:CMP
  */
-#define CAL_RM_IM(BWD, BWD2, BWD3, OP, CAST, CRY, IPINC, ANDN, ANDN2)	\
+#define CAL_RM_IM(BWD, BWD2, BWD3, OP, CAST, CRY, IPINC, ANDN)		\
 	if ((modrm & 0xc0) == 0xc0) {					\
 		tmp##BWD = genreg##BWD(modrm & 7);			\
 		tmp##BWD2##2 = mem->read##BWD2(get_seg_adr(CS, ++ip));	\
@@ -743,9 +753,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	}								\
 	ip += IPINC;							\
 	flag8 = flag_cal##BWD[tmp##BWD3 ANDN];				\
-	flag8 |= (tmp##BWD ^ tmp##BWD2##2 ^ tmp##BWD3) & AF;		\
-	(tmp##BWD3 ^ tmp##BWD) & (tmp##BWD3 ^ tmp##BWD2##2) & ANDN2?	\
-		flagu8 |= OFSET8 : flagu8 &= OFCLR8;
+	flag8 |= (tmp##BWD ^ tmp##BWD2##2 ^ tmp##BWD3) & AF;
 
 #define LOGOP_RM_IM(BWD, BWD2, OP, IPINC)				\
 	if ((modrm & 0xc0) == 0xc0) {					\
@@ -778,7 +786,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	ip += IPINC;							\
 	flag8 = flag_cal##BWD[tmp##BWD3 ANDN];				\
 	flag8 |= (tmp##BWD ^ tmp##BWD2##2 ^ tmp##BWD3) & AF;		\
-	(tmp##BWD3 ^ tmp##BWD) & (tmp##BWD3 ^ tmp##BWD2##2) & ANDN2?	\
+	(tmp##BWD ^ tmp##BWD3) & (tmp##BWD ^ tmp##BWD2##2) & ANDN2?	\
 		flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 
 	case 0x80:
@@ -791,22 +799,30 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 
 		switch (subop) {
 		case 0: // ADD r/m8, imm8
-			CAL_RM_IM(b, b, w, +, u8, 0, 1, , 0x80);
+			CAL_RM_IM(b, b, w, +, u8, 0, 1, );
+			(tmpb ^ tmpw) & (tmpb2 ^ tmpw) & 0x80?
+				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 			break;
 		case 1: // OR r/m8, imm8
 			LOGOP_RM_IM(b, b, |, 1);
 			break;
 		case 2: // ADC r/m8, imm8
-			CAL_RM_IM(b, b, w, +, u8, (flag8 & CF), 1, , 0x80);
+			CAL_RM_IM(b, b, w, +, u8, (flag8 & CF), 1, );
+			(tmpb ^ tmpw) & (tmpb2 ^ tmpw) & 0x80?
+				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 			break;
 		case 3: // SBB r/m8, imm8
-			CAL_RM_IM(b, b, w, -, u8, -(flag8 & CF), 1, & 0x1ff, 0x80);
+			CAL_RM_IM(b, b, w, -, u8, -(flag8 & CF), 1, & 0x1ff);
+			(tmpb ^ tmpw) & (tmpb ^ tmpb2) & 0x80?
+				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 			break;
 		case 4: // AND r/m8, imm8
 			LOGOP_RM_IM(b, b, &, 1);
 			break;
 		case 5: // SUB r/m8, imm8
-			CAL_RM_IM(b, b, w, -, u8, 0, 1, & 0x1ff, 0x80);
+			CAL_RM_IM(b, b, w, -, u8, 0, 1, & 0x1ff);
+			(tmpb ^ tmpw) & (tmpb ^ tmpb2) & 0x80?
+				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 			break;
 		case 6: // XOR r/m8, imm8
 			LOGOP_RM_IM(b, b, ^, 1);
@@ -828,22 +844,30 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		switch (subop) {
 
 		case 0: // ADD r/m16, imm16
-			CAL_RM_IM(w, w, d, +, u16, 0, 2, , 0x8000);
+			CAL_RM_IM(w, w, d, +, u16, 0, 2, );
+			(tmpw ^ tmpd) & (tmpw2 ^ tmpd) & 0x8000?
+				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 			break;
 		case 1: // OR r/m16, imm16
 			LOGOP_RM_IM(w, w, |, 2);
 			break;
 		case 2: // ADC r/m16, imm16
-			CAL_RM_IM(w, w, d, +, u16, (flag8 & CF), 2, , 0x8000);
+			CAL_RM_IM(w, w, d, +, u16, (flag8 & CF), 2, );
+			(tmpw ^ tmpd) & (tmpw2 ^ tmpd) & 0x8000?
+				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 			break;
 		case 3: // SBB r/m16, imm16
-			CAL_RM_IM(w, w, d, -, u16, -(flag8 & CF), 2, & 0x1ffff, 0x8000);
+			CAL_RM_IM(w, w, d, -, u16, -(flag8 & CF), 2, & 0x1ffff);
+			(tmpw ^ tmpd) & (tmpw ^ tmpw2) & 0x8000?
+				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 			break;
 		case 4: // AND r/m16, imm16
 			LOGOP_RM_IM(w, w, &, 2);
 			break;
 		case 5: // SUB r/m16, imm16
-			CAL_RM_IM(w, w, d, -, u16, 0, 2, & 0x1ffff, 0x8000);
+			CAL_RM_IM(w, w, d, -, u16, 0, 2, & 0x1ffff);
+			(tmpw ^ tmpd) & (tmpw ^ tmpw2) & 0x8000?
+				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 			break;
 
 		case 6: // XOR r/m16, imm16
@@ -866,22 +890,30 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 
 		switch (subop) {
 		case 0: // ADD r/m16, imm8
-			CAL_RM_IM(w, b, d, +, u16, 0, 1, , 0x8000);
+			CAL_RM_IM(w, b, d, +, u16, 0, 1, );
+			(tmpw ^ tmpd) & (tmpb2 ^ tmpd) & 0x8000?
+				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 			break;
 		case 1: // OR r/m16, imm8
 			LOGOP_RM_IM(w, b, |, 1);
 			break;
 		case 2: // ADC r/m16, imm8
-			CAL_RM_IM(w, b, d, +, u16, (flag8 & CF), 1, , 0x8000);
+			CAL_RM_IM(w, b, d, +, u16, (flag8 & CF), 1, );
+			(tmpw ^ tmpd) & (tmpb2 ^ tmpd) & 0x8000?
+				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 			break;
 		case 3: // SBB r/m16, imm8
-			CAL_RM_IM(w, b, d, -, u16, -(flag8 & CF), 1, & 0x1ffff, 0x8000);
+			CAL_RM_IM(w, b, d, -, u16, -(flag8 & CF), 1, & 0x1ffff);
+			(tmpw ^ tmpd) & (tmpw ^ tmpb2) & 0x8000?
+				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 			break;
 		case 4: // AND r/m16, imm8
 			LOGOP_RM_IM(w, b, &, 1);
 			break;
 		case 5: // SUB r/m16, imm8
-			CAL_RM_IM(w, b, d, -, u16, 0, 1, & 0x1ffff, 0x8000);
+			CAL_RM_IM(w, b, d, -, u16, 0, 1, & 0x1ffff);
+			(tmpw ^ tmpd) & (tmpw ^ tmpb2) & 0x8000?
+				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 			break;
 		case 6: // XOR r/m16, imm8
 			LOGOP_RM_IM(w, b, ^, 1);
