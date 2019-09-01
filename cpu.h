@@ -195,6 +195,11 @@ private:
 	u8 flag_calb[0x200]; // 512バイト
 	u8 flag_calw[0x20000]; // 128Kバイト
 
+	u8 modrm_add_seg[3][8] = {{DS, DS, SS, SS, DS, DS, DS, DS},
+				  {DS, DS, SS, SS, DS, DS, SS, DS},
+				  {DS, DS, SS, SS, DS, DS, SS, DS}};
+	u8 seg_ovride = 0;
+
 	BUS *mem, *io;
 
 	u32 get_seg_adr(const SEGREG seg, const u16 a);

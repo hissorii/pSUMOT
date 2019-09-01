@@ -28,7 +28,6 @@ CPU::CPU(BUS* bus) {
 		sf = (i & 0x8000)? SF : 0;
 		zf = (i == 0)? ZF : 0;
 		pf = (u8)(i & 0xff); // パリティは下位8ビットのみチェックする
-		pf ^= pf >> 8;
 		pf ^= pf >> 4;
 		pf ^= pf >> 2;
 		pf ^= pf >> 1;
@@ -248,55 +247,9 @@ u16 CPU::modrm16_ea(u8 modrm)
 // セグメント加算する
 u32 CPU::modrm16_seg_ea(u8 modrm)
 {
-	u16 mod;
-	u32 tmp32;
-
-	mod = modrm >> 6;
-
-	switch (modrm & 7) {
-	case 0:
-		tmp32 = bx + si + sdcr[DS].base;
-		break;
-	case 1:
-		tmp32 = bx + di + sdcr[DS].base;
-		break;
-	case 2:
-		tmp32 = bp + si + sdcr[SS].base;
-		break;
-	case 3:
-		tmp32 = bp + di + sdcr[SS].base;
-		break;
-	case 4:
-		tmp32 = si + sdcr[DS].base;
-		break;
-	case 5:
-		tmp32 = di + sdcr[DS].base;
-		break;
-	case 6:
-		if (mod == 0) {
-			tmp32 = mem->read16(get_seg_adr(CS, ip)) + sdcr[DS].base;
-			ip += 2;
-			break;
-		}
-		tmp32 = bp + sdcr[SS].base;
-		break;
-	case 7:
-		tmp32 = bx + sdcr[DS].base;
-		break;
-	}
-
-	// xxx dispは符号つきなので考慮しなくてはならない
-	if (mod == 1) {
-		tmp32 += mem->read8(get_seg_adr(CS, ip));
-		ip++;
-	} else if (mod == 2) {
-		tmp32 += mem->read16(get_seg_adr(CS, ip));
-		ip += 2;
-	}
-
-	return tmp32;
+	return modrm16_ea(modrm)
+		+ sdcr[modrm_add_seg[modrm >> 6][modrm & 7]].base;
 }
-
 
 // リアルモードでワード動作の場合
 u16 CPU::modrm16w(u8 modrm)
@@ -326,6 +279,8 @@ void CPU::exec() {
 
 #ifdef CORE_DAS
 	char str8x[8][4] = {"ADD", "OR", "ADC", "SBB", "AND", "SUB", "", "CMP"};
+	char strdx[8][8] = {"ROL", "ROR", "RCL", "RCR", "SHL/SAL", "SHR", "", "SAR"};
+	char strff[8][5] = {"INC", "DEC", "CALL", "CALL", "JMP", "JMP", "PUSH", ""};
 #endif
 	DAS_dump_reg();
 	op = mem->read8(get_seg_adr(CS, ip++));
@@ -410,6 +365,11 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		break;
 
 /******************** PUSH ********************/
+// xxxセグメントオーバーライドされていても、call, pusha, enterではSSを使うらしい
+#define PUSHW0(d)				\
+	sp -= 2;				\
+	mem->write16((segreg[SS] << 4) + sp, d)
+
 #define PUSHW(d)				\
 	sp -= 2;				\
 	mem->write16(get_seg_adr(SS, sp), d)
@@ -466,14 +426,14 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		DAS_prt_post_op(0);
 		DAS_pr("PUSHA\n\n");
 		tmpw = sp;
-		PUSHW(ax);
-		PUSHW(cx);
-		PUSHW(dx);
-		PUSHW(bx);
-		PUSHW(tmpw);
-		PUSHW(bp);
-		PUSHW(si);
-		PUSHW(di);
+		PUSHW0(ax);
+		PUSHW0(cx);
+		PUSHW0(dx);
+		PUSHW0(bx);
+		PUSHW0(tmpw);
+		PUSHW0(bp);
+		PUSHW0(si);
+		PUSHW0(di);
 		break;
 
 	case 0x68: // PUSH imm16 (PUSH imm32)
@@ -676,6 +636,16 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 				ip += (s16)tmpw;
 			}
 			break;
+		}
+		break;
+
+	case 0x72: // JB rel8 or JC rel8 or JNAE rel8
+		DAS_prt_post_op(1);
+		DAS_pr("JB/JC/JNAE 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));
+		if ((flag8 & CF)) {
+			ip += (s8)mem->read8(get_seg_adr(CS, ip)) + 1;
+		} else {
+			ip++;
 		}
 		break;
 
@@ -1136,6 +1106,14 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		flagu8 &= OFCLR8;
 		break;
 
+/******************** CBW ********************/
+
+	case 0x98:
+		DAS_prt_post_op(0);
+		DAS_pr("CBW\n\n");
+		ah = (al & 0x80)? 0xff : 0x0 ;
+		break;
+
 /******************** Rotate/Shift ********************/
 
 	case 0xc0:
@@ -1147,6 +1125,38 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		case 0x5: // SHR r/m8, imm8
 			printf("hogehoge");
 			break;
+		}
+		break;
+
+/*
+          76  543 210
++--------+-----------+---------+---------+
+|110100vw|mod op2 r/m|(DISP-LO)|(DISP-HI)|
++--------+-----------+---------+---------+
+ */
+	case 0xd1:
+		modrm = mem->read8(get_seg_adr(CS, ip));
+		subop = modrm >> 3 & 7;
+		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
+		DAS_pr("%s ", strdx[subop]);
+		DAS_modrm16(modrm, false, true, true);
+		switch (subop) {
+		// D1 /4 r/m16
+		case 0x4: // SAL/SHL r/m16 (SAL/SHL r/m32)
+			ip++;
+			if ((modrm & 0xc0) == 0xc0) {
+				tmpd = genregw(modrm & 0x07) << 1;
+				genregw(modrm & 0x07) = (u16)tmpd;
+			} else {
+				tmpadr = modrm16_seg_ea(modrm);
+				tmpd = mem->read16(tmpadr) << 1;
+				mem->write16(tmpadr, (u16)tmpd);
+			}
+			flag8 = flag_calw[tmpd];
+			// 元の値の15bitと14bit比較だが、すでにtmpdは1左シフト
+			// しているので、16bitと15bitを比較する
+			(tmpd ^ tmpd << 1) & 0x10000?
+				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 		}
 		break;
 
@@ -1177,6 +1187,19 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 			// nothing to do
 			ip++;
 			break;
+		}
+		break;
+
+/******************** LOOP ********************/
+
+	case 0xe2: // LOOP rel8
+		DAS_prt_post_op(1);
+		tmpb = mem->read8(get_seg_adr(CS, ip));
+		DAS_pr("LOOP 0x%02x\n\n", tmpb);
+		ip++;
+		cx--;
+		if (cx != 0) {
+			ip += (s8)tmpb;
 		}
 		break;
 
@@ -1252,7 +1275,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		warg1 = mem->read16(get_seg_adr(CS, ip));
 		ip += 2;
 		DAS_pr("CALL 0x%04x\n\n", warg1);
-		PUSHW(ip);
+		PUSHW0(ip);
 		ip += (s16)warg1;
 		break;
 /*
@@ -1266,8 +1289,8 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		warg2 = mem->read16(get_seg_adr(CS, ip + 2));
 		ip += 4;
 		DAS_pr("CALL %04x:%04x\n\n", warg2, warg1);
-		PUSHW(segreg[CS]);
-		PUSHW(ip);
+		PUSHW0(segreg[CS]);
+		PUSHW0(ip);
 		update_segreg(CS, warg2);
 		ip = warg1;
 		break;
@@ -1337,6 +1360,18 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 		}
 		break;
 
+/******************** セグメントオーバーライド ********************/
+	case 0x2e: // SEG=CS
+		DAS_prt_post_op(0);
+		DAS_pr("SEG=CS\n\n");
+		seg_ovride++;
+		sdcr[DS].base = sdcr[CS].base;
+		sdcr[SS].base = sdcr[CS].base;
+		if (seg_ovride >= 8) { // xxx ここら辺の情報不足
+			// xxx ソフトウェア例外
+		}
+		return; // リターンする
+
 /******************** プロセッサコントロール ********************/
 
 	case 0xfb: // STI
@@ -1346,12 +1381,39 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 		break;
 
 	case 0xff: 
-		DAS_prt_post_op(1);
-		DAS_pr("xxx\n\n");
+		modrm = mem->read8(get_seg_adr(CS, ip));
+		subop = modrm >> 3 & 7;
+		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
+		DAS_pr("%s ", strff[subop]);
+		DAS_modrm16(modrm, false, true, true);
+		switch (subop) {
+		case 2: // CALL r/m16 (CALL r/m32) 絶対関節nearコール
+			ip++;
+			if ((modrm & 0xc0) == 0xc0) {
+				PUSHW0(ip);
+				ip = genregw(modrm & 7);
+			} else {
+				tmpadr = modrm16_seg_ea(modrm);
+				PUSHW0(ip);
+				ip = mem->read16(tmpadr);
+			}
+			break;
+		default:
+			printf("xxx");
+		}
 		break;
 
 	default:
 		DAS_prt_post_op(0);
 		printf("xxxxxxxxxx\n\n");
+	}
+
+	if (seg_ovride > 0) {
+		seg_ovride--;
+	}
+	// オーバーライドしたセグメントを元に戻す
+	if (seg_ovride == 0) {
+		sdcr[DS].base = segreg[DS] << 4;
+		sdcr[SS].base = segreg[SS] << 4;
 	}
 }
