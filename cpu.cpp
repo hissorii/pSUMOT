@@ -280,7 +280,7 @@ void CPU::exec() {
 #ifdef CORE_DAS
 	char str8x[8][4] = {"ADD", "OR", "ADC", "SBB", "AND", "SUB", "", "CMP"};
 	char strdx[8][8] = {"ROL", "ROR", "RCL", "RCR", "SHL/SAL", "SHR", "", "SAR"};
-	char strff[8][5] = {"INC", "DEC", "CALL", "CALL", "JMP", "JMP", "PUSH", ""};
+	char strfx[8][5] = {"INC", "DEC", "CALL", "CALL", "JMP", "JMP", "PUSH", ""};
 #endif
 	DAS_dump_reg();
 	op = mem->read8(get_seg_adr(CS, ip++));
@@ -320,6 +320,22 @@ OF/SF/ZF/AF/PF/CF:結果による
 			tmpd = tmpw + tmpw2;
 			mem->write16(tmpadr, (u16)tmpd);
 		}
+		ip++;
+		flag8 = flag_calw[tmpd];
+		flag8 |= (tmpw ^ tmpw2 ^ tmpd) & AF;
+		(tmpd ^ tmpw) & (tmpd ^ tmpw2) & 0x8000?
+			flagu8 |= OFSET8 : flagu8 &= OFCLR8;
+		break;
+
+	case 0x03: // ADD r16, r/m16 (ADD r32, r/m32)
+		modrm = mem->read8(get_seg_adr(CS, ip));
+		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
+		DAS_pr("ADD ");
+		DAS_modrm16(modrm, true, true, true);
+		tmpw = genregw(modrm >> 3 & 7);
+		tmpw2 = modrm16w(modrm);
+		tmpd = tmpw + tmpw2;
+		genregw(modrm >> 3 & 7) = tmpd;
 		ip++;
 		flag8 = flag_calw[tmpd];
 		flag8 |= (tmpw ^ tmpw2 ^ tmpd) & AF;
@@ -1114,6 +1130,19 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		ah = (al & 0x80)? 0xff : 0x0 ;
 		break;
 
+/******************** LODS ********************/
+
+	case 0xac:
+		DAS_prt_post_op(0);
+		DAS_pr("LODSB\n\n");
+		al = mem->read8(sdcr[DS].base + si);
+		break;
+	case 0xad:
+		DAS_prt_post_op(0);
+		DAS_pr("LODSW\n\n");
+		ax = mem->read16(sdcr[DS].base + si);
+		break;
+
 /******************** Rotate/Shift ********************/
 
 	case 0xc0:
@@ -1360,7 +1389,36 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 		}
 		break;
 
+	case 0xf7:
+		modrm = mem->read8(get_seg_adr(CS, ip));
+		subop = modrm >> 3 & 7;
+		switch (subop) {
+		case 0x6: // DIV r/m16
+			DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
+			DAS_pr("DIV ");
+			DAS_modrm16(modrm, false, true, true);
+			ip++;
+			tmpd = (u32)(dx << 16) + ax;
+			tmpw = modrm16w(modrm);
+			ax = tmpd / tmpw;
+			dx = tmpd % tmpw;
+			break;
+		}
+		break;
+
 /******************** セグメントオーバーライド ********************/
+
+	case 0x26: // SEG=ES
+		DAS_prt_post_op(0);
+		DAS_pr("SEG=ES\n\n");
+		seg_ovride++;
+		sdcr[DS].base = sdcr[ES].base;
+		sdcr[SS].base = sdcr[ES].base;
+		if (seg_ovride >= 8) { // xxx ここら辺の情報不足
+			// xxx ソフトウェア例外
+		}
+		return; // リターンする
+
 	case 0x2e: // SEG=CS
 		DAS_prt_post_op(0);
 		DAS_pr("SEG=CS\n\n");
@@ -1380,11 +1438,42 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 		flagu8 |= IFSET8;
 		break;
 
+	case 0xfe:
+		modrm = mem->read8(get_seg_adr(CS, ip));
+		subop = modrm >> 3 & 7;
+		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
+		DAS_pr("%s ", strfx[subop]);
+		DAS_modrm16(modrm, false, true, false);
+		switch (subop) {
+		case 0: // INC r/m8
+			ip++;
+			if ((modrm & 0xc0) == 0xc0) {
+				// はみ出る可能性があるのでwordに格納
+				tmpw = genregb(modrm & 7);
+				tmpw2 = tmpw + 1;
+				genregb(modrm & 7) = (u16)tmpw2;
+			} else {
+				tmpadr = modrm16_seg_ea(modrm);
+				tmpw = mem->read16(tmpadr);
+				tmpw2 = tmpw + 1;
+				mem->write16(tmpadr, (u16)tmpw2);
+			}
+			flag8 &= CF; /* CF以外はリセット*/
+			flag8 |= flag_calb[tmpw2];
+			flag8 |= (tmpw ^ tmpw2) & AF;
+			(tmpw ^ tmpw2) & 0x8000?
+				flagu8 |= OFSET8:flagu8 &= OFCLR8;
+			break;
+		default:
+			printf("xxx");
+		}
+		break;
+
 	case 0xff: 
 		modrm = mem->read8(get_seg_adr(CS, ip));
 		subop = modrm >> 3 & 7;
 		DAS_prt_post_op(DAS_nr_disp_modrm(modrm) + 1);
-		DAS_pr("%s ", strff[subop]);
+		DAS_pr("%s ", strfx[subop]);
 		DAS_modrm16(modrm, false, true, true);
 		switch (subop) {
 		case 2: // CALL r/m16 (CALL r/m32) 絶対関節nearコール
