@@ -208,9 +208,9 @@ private:
 #ifdef CORE_DAS
 	void DAS_dump_reg();
 	void DAS_prt_post_op(u8 n);
-	u8 DAS_nr_disp_modrm(u8 modrm);
 	void DAS_modrm16(u8 modrm, bool isReg, bool isDest, bool isWord);
 #endif
+	u8 nr_disp_modrm(u8 modrm);
 	u16 modrm16_ea(u8 modrm);
 	u32 modrm16_seg_ea(u8 modrm);
 	u16 modrm16w(u8 modrm);

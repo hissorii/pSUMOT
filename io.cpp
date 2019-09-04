@@ -23,11 +23,11 @@ void IO::write8(u32 addr, u8 data) {
 }
 
 u16 IO::read16(u32 addr) {
-	return (*(iop + addr) << 8) + *(iop + addr + 1);
+	return (*(iop + addr + 1) << 8) + *(iop + addr);
 }
 
 void IO::write16(u32 addr, u16 data) {
-	*(iop + addr) = data & 8;
+	*(iop + addr) = data & 0xff;
 	*(iop + addr + 1) = data >> 8;
 }
 

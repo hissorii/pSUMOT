@@ -47,7 +47,7 @@ u8 Memory::read8(u32 addr) {
 		return *(ram + addr);		
 	}
 	if (addr >= 0xfffc0000) {
-			// システムROM領域内の値を返す
+		// システムROM領域内の値を返す
 		return *(sysrom + (addr - 0xfffc0000));
 	}
 	return *(ram + addr);
