@@ -31,5 +31,18 @@ void IO::write16(u32 addr, u16 data) {
 	*(iop + addr + 1) = data >> 8;
 }
 
+u32 IO::read32(u32 addr)
+{
+	return (*(iop + addr + 3) << 24) + (*(iop + addr + 2) << 16)
+		+ (*(iop + addr + 1) << 8) + *(iop + addr);
+}
+void IO::write32(u32 addr, u32 data)
+{
+	*(iop + addr) = data & 0xff;
+	*(iop + addr + 1) = data >> 8;
+	*(iop + addr + 2) = data >> 16;
+	*(iop + addr + 3) = data >> 24;
+}
+
 
 } // namespace pSUMOT

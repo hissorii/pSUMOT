@@ -54,6 +54,10 @@ void CPU::update_segreg(const u8 seg, const u16 n) {
 }
 
 void CPU::reset() {
+	opsize = size16;
+	addrsize = size16;
+	isRealMode = true;
+
 	for (int i = 0; i < NR_SEGREG; i++) segreg[i] = 0x0000;
 	segreg[CS] = 0xf000;
 	ip = 0xfff0;
@@ -83,13 +87,13 @@ void CPU::DAS_dump_reg() {
 	static int step = 1;
 
 	for (i = 0; i < 4; i++) {
-		printf("%s:%08x ", genreg_name[2][i], genreg32(i));
+		printf("%s:%08x ", genreg_name[2][i], genregd(i));
 	}
 	printf("  eflags:%08x", (u16)flagu8 << 8 | flag8);
 	printf("  %4d", step++);
 	printf("\n");
 	for (i = 4; i < NR_GENREG; i++) {
-		printf("%s:%08x ", genreg_name[2][i], genreg32(i));
+		printf("%s:%08x ", genreg_name[2][i], genregd(i));
 	}
 	printf("     eip:%08x", ip);
 	printf("\n");
@@ -242,6 +246,11 @@ u16 CPU::modrm16_ea(u8 modrm)
 	return tmp16;
 }
 
+u32 CPU::modrm32_ea(u8 modrm)
+{
+	// xxx 後で実装する
+}
+
 // modが11でないことはあらかじめチェックしておくこと
 // Effective Addressを取得
 // セグメント加算する
@@ -250,6 +259,17 @@ u32 CPU::modrm16_seg_ea(u8 modrm)
 {
 	return modrm16_ea(modrm)
 		+ sdcr[modrm_add_seg[modrm >> 6][modrm & 7]].base;
+}
+
+u32 CPU::modrm_seg_ea(u8 modrm)
+{
+	if (addrsize == size16) {
+		return modrm16_ea(modrm)
+			+ sdcr[modrm_add_seg[modrm >> 6][modrm & 7]].base;
+	} else {
+		return modrm32_ea(modrm)
+			+ sdcr[modrm_add_seg[modrm >> 6][modrm & 7]].base;
+	}
 }
 
 // リアルモードでワード動作の場合
@@ -277,13 +297,14 @@ void CPU::exec() {
 	u8 tmpb, tmpb2;
 	u16 tmpw, tmpw2;
 	u32 tmpd, tmpadr;
+	u32 src, dst, res;
 
 #ifdef CORE_DAS
 	char str8x[8][4] = {"ADD", "OR", "ADC", "SBB", "AND", "SUB", "", "CMP"};
 	char strdx[8][8] = {"ROL", "ROR", "RCL", "RCR", "SHL/SAL", "SHR", "", "SAR"};
 	char strfx[8][5] = {"INC", "DEC", "CALL", "CALL", "JMP", "JMP", "PUSH", ""};
 #endif
-	if (seg_ovride == 0) {
+	if (seg_ovride == 0 && !opsize_ovride && !addrsize_ovride) {
 		DAS_dump_reg();
 	}
 	op = mem->read8(get_seg_adr(CS, ip++));
@@ -312,23 +333,40 @@ OF/SF/ZF/AF/PF/CF:結果による
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("ADD ");
 		DAS_modrm16(modrm, true, false, true);
-		tmpw2 = genregw(modrm >> 3 & 7);
 		ip++;
-		if ((modrm & 0xc0) == 0xc0) {
-			tmpw = genregw(modrm & 7);
-			tmpd = tmpw + tmpw2;
-			genregw(modrm & 7) = tmpd;
+		// xxx アドレスサイズの差はマクロ化して吸収する
+		if (opsize == size16) {
+			src = genregw(modrm >> 3 & 7);
+			if ((modrm & 0xc0) == 0xc0) {
+				dst = genregw(modrm & 7);
+				res = src + dst;
+				genregw(modrm & 7) = res;
+			} else {
+				tmpadr = modrm_seg_ea(modrm);
+				dst = mem->read16(tmpadr);
+				res = src + dst;
+				mem->write16(tmpadr, (u16)res);
+			}
+			ip++;
+			flag8 = flag_calw[res];
+			flag8 |= (src ^ dst ^ res) & AF;
+			(res ^ src) & (res ^ dst) & 0x8000?
+				flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 		} else {
-			tmpadr = modrm16_seg_ea(modrm);
-			tmpw = mem->read16(tmpadr);
-			tmpd = tmpw + tmpw2;
-			mem->write16(tmpadr, (u16)tmpd);
+			src = genregd(modrm >> 3 & 7);
+			if ((modrm & 0xc0) == 0xc0) {
+				dst = genregd(modrm & 7);
+			        res = src + dst;
+				genregd(modrm & 7) = res;
+			} else {
+				tmpadr = modrm_seg_ea(modrm);
+				dst = mem->read32(tmpadr);
+				res = src + dst;
+				mem->write32(tmpadr, res);
+			}
+			ip++;
+			// xxx ここは32bitは16bitとは違うフラグ計算
 		}
-		ip++;
-		flag8 = flag_calw[tmpd];
-		flag8 |= (tmpw ^ tmpw2 ^ tmpd) & AF;
-		(tmpd ^ tmpw) & (tmpd ^ tmpw2) & 0x8000?
-			flagu8 |= OFSET8 : flagu8 &= OFCLR8;
 		break;
 
 	case 0x03: // ADD r16, r/m16 (ADD r32, r/m32)
@@ -1727,6 +1765,24 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 		}
 		return; // リターンする
 
+/*************** オペランドサイズオーバーライドプリフィックス ***************/
+
+	case 0x66:
+		DAS_prt_post_op(0);
+		DAS_pr("Ope Size Override\n\n");
+		opsize_ovride = true;
+		opsize = isRealMode? size32 : size16;
+		return; // リターンする
+
+/*************** アドレスサイズオーバーライドプリフィックス ***************/
+
+	case 0x67:
+		DAS_prt_post_op(0);
+		DAS_pr("Addr Size Override\n\n");
+		addrsize_ovride = true;
+		addrsize = isRealMode? size32 : size16;
+		return; // リターンする
+
 /******************** プロセッサコントロール ********************/
 
 	case 0xfb: // STI
@@ -1802,4 +1858,10 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 		sdcr[DS].base = segreg[DS] << 4;
 		sdcr[SS].base = segreg[SS] << 4;
 	}
+
+	// {オペランド|アドレス}サイズオーバーライドプリフィックスを元に戻す
+	opsize_ovride = false;
+	addrsize_ovride = false;
+	opsize = isRealMode? size16 : size32;
+	addrsize = isRealMode? size16 : size32;
 }

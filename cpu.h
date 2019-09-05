@@ -72,7 +72,7 @@ edi|                |        di       |
 #define bl (reg[3].reg8.l)
 
 // eax, ecx, edx, ebx, esp ,ebp, esi ,ediの順に取り出す
-#define genreg32(x) (reg[x].reg32)
+#define genregd(x) (reg[x].reg32)
 // ax, cx, dx, bx, sp, bp, si, diの順に取り出す
 #define genregw(x) (reg[x].reg16.lower16)
 // ah, ch, dh, bhの順に取り出す
@@ -199,6 +199,11 @@ private:
 				  {DS, DS, SS, SS, DS, DS, SS, DS},
 				  {DS, DS, SS, SS, DS, DS, SS, DS}};
 	u8 seg_ovride = 0;
+	bool opsize_ovride = false;
+	bool addrsize_ovride = false;
+	enum SIZEPRFX {size16, size32};
+	SIZEPRFX opsize, addrsize;
+	bool isRealMode;
 
 	BUS *mem, *io;
 
@@ -212,7 +217,9 @@ private:
 #endif
 	u8 nr_disp_modrm(u8 modrm);
 	u16 modrm16_ea(u8 modrm);
+	u32 modrm32_ea(u8 modrm);
 	u32 modrm16_seg_ea(u8 modrm);
+	u32 modrm_seg_ea(u8 modrm);
 	u16 modrm16w(u8 modrm);
 	u8 modrm16b(u8 modrm);
 public:

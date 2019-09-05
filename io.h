@@ -12,6 +12,9 @@ public:
 	void write8(u32 addr, u8 data);
 	u16 read16(u32 addr);
 	void write16(u32 addr, u16 data);
+	u32 read32(u32 addr);
+	void write32(u32 addr, u32 data);
+
 };
 
 } // namespace pSUMOT
