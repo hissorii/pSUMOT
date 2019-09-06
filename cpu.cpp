@@ -386,11 +386,11 @@ OF/SF/ZF/AF/PF/CF:結果による
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("ADD ");
 		DAS_modrm16(modrm, true, true, true);
+		ip++;
 		dst = genregw(modrm >> 3 & 7);
 		src = modrm16w(modrm);
 		res = dst + src;
 		genregw(modrm >> 3 & 7) = res;
-		ip++;
 		flag8 = flag_calw[res];
 		flag8 |= (src ^ dst ^ res) & AF;
 		(res ^ src) & (res ^ dst) & 0x8000?
@@ -416,12 +416,13 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	DAS_prt_post_op(nr_disp_modrm(modrm) + 1);	\
 	DAS_pr(#str" ");				\
 	DAS_modrm16(modrm, true, true, bwd##ISWORD);	\
+	ip++;						\
 	dst = genreg##bwd(greg);			\
 	dst op##= modrm16##bwd(modrm);			\
 	genreg##bwd(greg) = dst;			\
 	flag8 = flag_cal##bwd[dst];			\
-	flagu8 &= ~OFSET8;				\
-	ip++;
+	flagu8 &= ~OFSET8;
+
 
 	case 0x08: // OR r/m8, r8
 		DAS_pr("xxxxx\n\n");
@@ -1294,6 +1295,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		DAS_pr("MOV ");
 		DAS_modrm16(modrm, false, false, false);
 		DAS_pr("0x%02x\n\n", mem->read8(get_seg_adr(CS, ip + nr_disp_modrm(modrm) + 1)));
+		// xxx 中身がない！？
 		break;
 
 /******************** TEST ********************/
