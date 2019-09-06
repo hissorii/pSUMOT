@@ -122,30 +122,34 @@ void CPU::DAS_prt_post_op(u8 n) {
 // リアルモード動作の場合
 // isReg: mod reg R/M の reg が存在するか
 // isDest: mod reg R/M の reg がDestinationになるか
-// isWord: ワード転送かバイト転送か
+// isWord: ワード(ダブルワード)転送かバイト転送か
 void CPU::DAS_modrm16(u8 modrm, bool isReg, bool isDest, bool isWord) {
 	u8 mod, reg, rm;
 #define NR_RM 8
 	char str[NR_RM][9] = {"[BX + SI", "[BX + DI", "[BP + SI", "[BP + DI", "[SI", "[DI", "[BP", "[BX", };
 	char s[] = " + 0x????";
 
+	REGSIZE regsize;
+	regsize = isWord? (opsize == size16? word : dword) : byte;
+	char sizestr[3][6] = {"byte", "word", "dword"};
+
 	if (isReg && isDest) {
 		reg = modrm >> 3 & 7;
-		printf("%s, ", genreg_name[isWord][reg]);
+		printf("%s, ", genreg_name[regsize][reg]);
 	}
 	mod = modrm >> 6;
 	rm = modrm & 7;
 
 	if (mod == 3) {
-		printf("%s%s", genreg_name[isWord][rm], isDest?"\n\n":", ");
+		printf("%s%s", genreg_name[regsize][rm], isDest?"\n\n":", ");
 		if (isReg && !isDest) {
 			reg = modrm >> 3 & 7;
-			printf("%s\n\n", genreg_name[isWord][reg]);
+			printf("%s\n\n", genreg_name[regsize][reg]);
 		}
 		return;
 	}
 
-	printf("%s ptr ", isWord?"word":"byte");
+	printf("%s ptr ", sizestr[regsize]);
 
 	if (rm == 6 && mod == 0) {
 		printf("[0x%04x]%s", mem->read16(get_seg_adr(CS, ip + 1)), isDest?"\n\n":", ");
@@ -163,7 +167,7 @@ void CPU::DAS_modrm16(u8 modrm, bool isReg, bool isDest, bool isWord) {
 
 	if (isReg && !isDest) {
 		reg = modrm >> 3 & 7;
-		printf("%s\n\n", genreg_name[isWord][reg]);
+		printf("%s\n\n", genreg_name[regsize][reg]);
 	}
 }
 
@@ -270,6 +274,16 @@ u32 CPU::modrm_seg_ea(u8 modrm)
 		return modrm32_ea(modrm)
 			+ sdcr[modrm_add_seg[modrm >> 6][modrm & 7]].base;
 	}
+}
+
+// リアルモードでダブルワード動作の場合
+// (オペランドサイズオーバーライドプリフィックスを使った場合)
+u32 CPU::modrm16d(u8 modrm)
+{
+	if (modrm >> 6 == 3) {
+		return genregd(modrm & 7);
+	}
+	return mem->read32(modrm16_seg_ea(modrm));
 }
 
 // リアルモードでワード動作の場合
@@ -1142,7 +1156,11 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		DAS_pr("MOV ");
 		DAS_modrm16(modrm, true, true, true);
 		ip++;
-		genregw(modrm >> 3 & 7) = modrm16w(modrm);
+		if (opsize == size16) {
+			genregw(modrm >> 3 & 7) = modrm16w(modrm);
+		} else {
+			genregd(modrm >> 3 & 7) = modrm16d(modrm);
+		}
 		break;
 /*
           76  543 210
@@ -1254,10 +1272,17 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	case 0xbe: // MOV SI, imm16
 		// go through
 	case 0xbf: // MOV DI, imm16
-		DAS_prt_post_op(2);
-		DAS_pr("MOV %s, 0x%04x\n\n", genreg_name[1][op & 7], mem->read16(get_seg_adr(CS, ip)));
-		genregw(op & 7) = mem->read16(get_seg_adr(CS, ip));
-		ip += 2;
+		if (opsize == size16) {
+			DAS_prt_post_op(2);
+			DAS_pr("MOV %s, 0x%04x\n\n", genreg_name[1][op & 7], mem->read16(get_seg_adr(CS, ip)));
+			genregw(op & 7) = mem->read16(get_seg_adr(CS, ip));
+			ip += 2;
+		} else {
+			DAS_prt_post_op(4);
+			DAS_pr("MOV %s, 0x%08x\n\n", genreg_name[2][op & 7], mem->read32(get_seg_adr(CS, ip)));
+			genregd(op & 7) = mem->read32(get_seg_adr(CS, ip));
+			ip += 4;
+		}
 		break;
 
 /*

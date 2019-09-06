@@ -117,6 +117,7 @@ private:
 		{"AX", "CX", "DX", "BX", "SP", "BP", "SI", "DI"},
 		{"EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI"}
 	};
+	enum REGSIZE {byte, word, dword};
 
 #define genregb(n) *genregb[n]
 	// al, cl, dl, bl, ah, ch, dh, bhの順に取り出す
@@ -220,8 +221,10 @@ private:
 	u32 modrm32_ea(u8 modrm);
 	u32 modrm16_seg_ea(u8 modrm);
 	u32 modrm_seg_ea(u8 modrm);
+	u32 modrm16d(u8 modrm);
 	u16 modrm16w(u8 modrm);
 	u8 modrm16b(u8 modrm);
+
 public:
 	CPU(BUS* bus);
 	void reset();
