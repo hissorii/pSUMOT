@@ -189,8 +189,10 @@ private:
 	enum {CF = 1 << 0, PF = 1 << 2, AF = 1 << 4, ZF = 1 << 6, SF = 1 << 7,
 	      TF = 1 << 8, IF = 1 << 9, DF = 1 << 10, OF = 1 << 11,
 	      DF8 = 1 << 2};
-#define OFSET8 0x08 // flagu8のOFをセットするための数
+#define TFSET8 0x01 // flagu8のTFをセットするための数
 #define IFSET8 0x02 // flagu8のIFをセットするための数
+#define DFSET8 0x04 // flagu8のDFをセットするための数
+#define OFSET8 0x08 // flagu8のOFをセットするための数
 	u8 flag8; // フラグの下位8ビット
 	u16 flagu8; // フラグの上位8ビット(16ビットのうち上位8ビットを使う)
 	u8 flag_calb[0x200]; // 512バイト
@@ -218,6 +220,8 @@ private:
 	void update_segreg(const u8 seg, const u16 n);
 
 #ifdef CORE_DAS
+	bool DAS_hlt;
+
 	void DAS_dump_reg();
 	void DAS_prt_post_op(u8 n);
 	void DAS_modrm16(u8 modrm, bool isReg, bool isDest, bool isWord);

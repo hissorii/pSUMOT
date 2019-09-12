@@ -73,6 +73,10 @@ void CPU::reset() {
 	 */
 	sdcr[CS].base = 0xffff0000;
 	flag8 = 0;
+
+#ifdef CORE_DAS
+	DAS_hlt = false;
+#endif
 }
 
 #ifdef CORE_DAS // CORE_DAS stands for cpu CORE DisASsembler
@@ -597,7 +601,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 // xxxセグメントオーバーライドされていても、call, pusha, enterではSSを使うらしい
 #define PUSHW0(d)				\
 	sp -= 2;				\
-	mem->write16((segreg[SS] << 4) + sp, (u16)d)
+	mem->write16((segreg[SS] << 4) + sp, (u16)(d))
 
 #define PUSHW(d)				\
 	sp -= 2;				\
@@ -1250,6 +1254,10 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		break;
 	case 0x7f: // JNLE/JG rel8
 		JCC(JNLE/JG, !(flag8 & ZF) && (flag8 ^ flagu8 << 4) & 0x80);
+		break;
+
+	case 0xe3:
+		JCC(JCXZ, !cx);
 		break;
 
 /*
@@ -2436,6 +2444,59 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		LxS(LDS, DS);
 		break;
 
+/******************** INT ********************/
+
+	case 0xcc: // INT 3
+		DAS_prt_post_op(0);
+		DAS_pr("INT 3\n\n");
+		PUSHW0(flagu8 << 8 | flag8);
+		PUSHW0(segreg[CS]);
+		PUSHW0(ip);
+		flagu8 &= ~(TFSET8 | IFSET8);
+		tmpadr = 3 * 4;
+		ip = mem->read16(tmpadr);
+		update_segreg(CS, mem->read16(tmpadr + 2));
+		break;
+	case 0xcd: // INT n
+		DAS_prt_post_op(1);
+		tmpb = mem->read8(get_seg_adr(CS, ip));
+		DAS_pr("INT %d\n\n", tmpb);
+		ip++;
+		PUSHW0(flagu8 << 8 | flag8);
+		PUSHW0(segreg[CS]);
+		PUSHW0(ip);
+		flagu8 &= ~(TFSET8 | IFSET8);
+		tmpadr = tmpb * 4;
+		ip = mem->read16(tmpadr);
+		update_segreg(CS, mem->read16(tmpadr + 2));
+		break;
+	case 0xce: // INTO
+		DAS_prt_post_op(0);
+		DAS_pr("INTO\n\n");
+		PUSHW0(flagu8 << 8 | flag8);
+		PUSHW0(segreg[CS]);
+		PUSHW0(ip);
+		flagu8 &= ~(TFSET8 | IFSET8);
+		ip = mem->read16(0x10);
+		update_segreg(CS, mem->read16(0x12));
+		break;
+	case 0xcf: // IRET
+		POPW0(ip);
+		POPW0(warg1);
+		update_segreg(CS, warg1);
+		POPW0(warg1);
+		flag8 = warg1 & 0xff;
+		flagu8 = warg1 >> 8;
+		break;
+
+/******************** XLAT ********************/
+
+	case 0xd7:
+		DAS_prt_post_op(0);
+		DAS_pr("XLAT\n\n");
+		al = mem->read8(get_seg_adr(DS, (bx + al) & 0xffff));
+		break;
+
 /******************** ESC ********************/
 
 	case 0xd8:
@@ -2468,6 +2529,26 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 
 /******************** LOOP ********************/
 
+	case 0xe0: // LOOPNE/LOOPNZ rel8
+		DAS_prt_post_op(1);
+		tmpb = mem->read8(get_seg_adr(CS, ip));
+		DAS_pr("LOOPNE/LOOPNZ 0x%02x\n\n", tmpb);
+		ip++; // jmpする前にインクリメントしておく必要がある
+		cx--;
+		if (cx != 0 && !(flag8 & ZF)) {
+			ip += (s8)tmpb;
+		}
+		break;
+	case 0xe1: // LOOPE/LOOPZ rel8
+		DAS_prt_post_op(1);
+		tmpb = mem->read8(get_seg_adr(CS, ip));
+		DAS_pr("LOOPE/LOOPZ 0x%02x\n\n", tmpb);
+		ip++;
+		cx--;
+		if (cx != 0 && flag8 & ZF) {
+			ip += (s8)tmpb;
+		}
+		break;
 	case 0xe2: // LOOP rel8
 		DAS_prt_post_op(1);
 		tmpb = mem->read8(get_seg_adr(CS, ip));
@@ -2836,6 +2917,14 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 		addrsize = isRealMode? size32 : size16;
 		return; // リターンする
 
+/*************** LOCK ***************/
+
+	case 0xf0:
+		DAS_prt_post_op(0);
+		DAS_pr("LOCK\n\n");
+		// nothing to do
+		break;
+
 /*************** リピートプリフィックス ***************/
 
 	case 0xf2:
@@ -2851,12 +2940,55 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 		repe_prefix = true;
 		return;
 
+/******************** HLT ********************/
+
+	case 0xf4:
+#ifdef CORE_DAS
+		if (!DAS_hlt) {
+			DAS_prt_post_op(0);
+			DAS_pr("HLT\n\n");
+		}
+		DAS_hlt = true; // xxx いつかfalseに戻す
+#endif
+		ip--;
+		return; // リターンする？
+
 /******************** プロセッサコントロール ********************/
 
+	case 0xf5:
+		DAS_prt_post_op(0);
+		DAS_pr("CMC\n\n");
+		(flag8 & CF)? flag8 &= ~CF : flag8 |= CF;
+		break;
+	case 0xf8:
+		DAS_prt_post_op(0);
+		DAS_pr("CLC\n\n");
+		flag8 &= ~CF;
+		break;
+	case 0xf9:
+		DAS_prt_post_op(0);
+		DAS_pr("STC\n\n");
+		flag8 |= CF;
+		break;
+	case 0xfa:
+		DAS_prt_post_op(0);
+		DAS_pr("CLI\n\n");
+		flagu8 &= ~IFSET8;
+		break;
 	case 0xfb: // STI
 		DAS_prt_post_op(0);
 		DAS_pr("STI\n\n");
 		flagu8 |= IFSET8;
+		break;
+	case 0xfc:
+		DAS_prt_post_op(0);
+		DAS_pr("CLD\n\n");
+		flagu8 &= ~DFSET8;
+		break;
+	case 0xfd:
+		DAS_prt_post_op(0);
+		DAS_pr("STD\n\n");
+		flagu8 |= DFSET8;
 		break;
 
 /******************** INC/DEC/CALL/JMP/PUSH ********************/
