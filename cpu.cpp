@@ -87,7 +87,7 @@ esp:000002de ebp:b6f7b498 esi:b6f9eb58 edi:bea69340
 cs:fc00 ds:0000 es:0000 ss:0000 fs:0000 gs:0000
 */
 void CPU::DAS_dump_reg() {
-	int i;
+	int i, j, startadr;
 	static int step = 1;
 
 	for (i = 0; i < 4; i++) {
@@ -106,13 +106,23 @@ void CPU::DAS_dump_reg() {
 	}
 	printf("\n\n");
 
-        if (step == 120) {
+	if (step == 120) {
                 for (i = 0; i < 32; i++) {
                         printf("0x%02x ", mem->read8(0xf7fb0 + i));
                         if (((i + 1) % 16) == 0) printf("\n");
                 }
                 printf("\n");
         }
+	if (step == 45497) {
+		startadr = 0xfc000;
+		for (i = 0; i < 16; i++) {
+			printf("%04x ", i * 16 + startadr);
+			for (j = 0; j < 16; j++) {
+				printf("%02x ", mem->read8(startadr + i * 16 + j));
+			}
+			printf("\n");
+                }
+	}
 }
 
 void CPU::DAS_prt_post_op(u8 n) {
@@ -599,13 +609,23 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 
 /******************** PUSH ********************/
 // xxxセグメントオーバーライドされていても、call, pusha, enterではSSを使うらしい
-#define PUSHW0(d)				\
-	sp -= 2;				\
-	mem->write16((segreg[SS] << 4) + sp, (u16)(d))
+#define PUSHW0(d)						\
+	if (opsize == size16) {					\
+		sp -= 2;					\
+		mem->write16((segreg[SS] << 4) + sp, (u16)(d));	\
+	} else {						\
+		sp -= 4;					\
+		mem->write32((segreg[SS] << 4) + sp, d);	\
+	}
 
-#define PUSHW(d)				\
-	sp -= 2;				\
-	mem->write16(get_seg_adr(SS, sp), d)
+#define PUSHW(d)					\
+	if (opsize == size16) {				\
+		sp -= 2;				\
+		mem->write16(get_seg_adr(SS, sp), d);	\
+	} else {					\
+		sp -= 4;				\
+		mem->write32(get_seg_adr(SS, sp), d);	\
+	}
 
 #define PUSHW_GENREG(reg)		\
 	DAS_prt_post_op(0);		\
@@ -616,6 +636,13 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	DAS_prt_post_op(0);		\
 	DAS_pr("PUSH "#seg"\n\n");	\
 	PUSHW(segreg[seg])
+
+/* 2バイト命令 (PUSH FS/GS用) */
+#define PUSH_SEG2(seg)			\
+	DAS_prt_post_op(1);		\
+	DAS_pr("PUSH "#seg"\n\n");	\
+	PUSHW(segreg[seg]);		\
+	ip++
 
 	case 0x06: // PUSH ES
 		PUSH_SEG(ES);
@@ -703,6 +730,14 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	DAS_pr("POP "#seg"\n\n");	\
 	POPW(dst);			\
 	update_segreg(seg, (u16)dst)
+
+/* 2バイト命令 (PUSH FS/GS用) */
+#define POP_SEG2(seg)			\
+	DAS_prt_post_op(1);		\
+	DAS_pr("POP "#seg"\n\n");	\
+	POPW(dst);			\
+	update_segreg(seg, (u16)dst);	\
+	ip++
 
 	case 0x07: // POP ES
 		POP_SEG(ES);
@@ -1183,6 +1218,13 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	case 0x0f:
 		subop = mem->read8(get_seg_adr(CS, ip));
 		switch (subop) {
+		case 0x01: // LGDT/LIDT
+			DAS_prt_post_op(2);
+			dst = mem->read16(get_seg_adr(CS, ++ip));
+			DAS_pr("%s\n\n", (dst >> 3 & 7) == 2?"LGDT":"LIDT");
+			ip++;
+			// xxx 中身をかく
+			break;
 		case 0x84: // JE rel16 (JE rel32)
 			DAS_prt_post_op(3);
 			dst = mem->read16(get_seg_adr(CS, ++ip));
@@ -1192,6 +1234,18 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 				ip += (s16)dst;
 			}
 			break;
+		case 0xa0: // PUSH FS
+			PUSH_SEG2(FS); // 2バイト命令用マクロ
+			break;
+		case 0xa1: // POP FS
+			POP_SEG2(FS);
+			break;
+		case 0xa8: // PUSH GS
+			PUSH_SEG2(GS);
+			break;
+		case 0xa9: // POP GS
+			POP_SEG2(GS);
+			break;
 		default:
 			DAS_pr("xxxxx\n\n");
 			// LFS/LGS/LSS... (80386)
@@ -1200,7 +1254,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 
 #define JCC(STR, COND)							\
 	DAS_prt_post_op(1);						\
-	DAS_pr(#STR"0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));	\
+	DAS_pr(#STR" 0x%02x\n\n", mem->read8(get_seg_adr(CS, ip)));	\
 	if (COND) {						   	\
 		ip += (s8)mem->read8(get_seg_adr(CS, ip)) + 1;		\
 	} else {							\
