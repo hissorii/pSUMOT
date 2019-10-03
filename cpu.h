@@ -224,7 +224,7 @@ private:
 
 	void DAS_dump_reg();
 	void DAS_prt_post_op(u8 n);
-	void DAS_modrm16(u8 modrm, bool isReg, bool isDest, bool isWord);
+	void DAS_modrm(u8 modrm, bool isReg, bool isDest, bool isWord);
 	void DAS_prt_rmr_rrm(const char *s, bool isReg, bool isDest, bool isWord);
 #endif
 	u8 nr_disp_modrm(u8 modrm);

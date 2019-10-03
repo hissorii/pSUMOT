@@ -133,16 +133,19 @@ void CPU::DAS_prt_post_op(u8 n) {
 		printf("%3c", ' ');
 }
 
-// リアルモード動作の場合
 // isReg: mod reg R/M の reg が存在するか
 // isDest: mod reg R/M の reg がDestinationになるか
 // isWord: ワード(ダブルワード)転送かバイト転送か
 // POP m16でregのないModR/Mでコンマ不要の場合はisReg=false, isDest=trueにする
-void CPU::DAS_modrm16(u8 modrm, bool isReg, bool isDest, bool isWord) {
-	u8 mod, reg, rm;
+void CPU::DAS_modrm(u8 modrm, bool isReg, bool isDest, bool isWord) {
+	u8 mod, reg, rm, sib;
+	u16 tip; // tmp ip
 #define NR_RM 8
-	char str[NR_RM][9] = {"[BX + SI", "[BX + DI", "[BP + SI", "[BP + DI", "[SI", "[DI", "[BP", "[BX", };
-	char s[] = " + 0x????";
+	char str[2][NR_RM][13] = {
+	  {"[BX + SI", "[BX + DI", "[BP + SI", "[BP + DI", "[SI", "[DI", "[BP", "[BX", },
+	  {"[EAX", "[ECX", "[EDX", "[EBX", "[EAX + EBX*8", "[EBP", "[ESI", "[EDI", }
+	};
+	char s[] = " + 0x????????";
 
 	REGSIZE regsize;
 	regsize = isWord? (opsize == size16? word : dword) : byte;
@@ -166,19 +169,38 @@ void CPU::DAS_modrm16(u8 modrm, bool isReg, bool isDest, bool isWord) {
 
 	printf("%s ptr ", sizestr[regsize]);
 
-	if (rm == 6 && mod == 0) {
+	// [disp16]
+	if (addrsize == size16 && rm == 6 && mod == 0) {
 		printf("[0x%04x]%s", mem->read16(get_seg_adr(CS, ip + 1)), isDest?"\n\n":", ");
 		return;
 	}
 
+	// [disp32]
+	if (addrsize == size32 && rm == 5 && mod == 0) {
+		printf("[0x%08x]%s", mem->read32(get_seg_adr(CS, ip + 1)), isDest?"\n\n":", ");
+		return;
+	}
+
+	tip = ip;
+
+	// <SIB>
+	if (addrsize == size32 && rm == 4) {
+		sib = mem->read8(get_seg_adr(CS, ++tip));
+		sprintf(str[1][4], "[%s + %s%s", genreg_name[1][sib & 3], genreg_name[1][sib >> 3 & 3], (sib >> 6) == 0? "" : (sib >> 6) == 1? "*2" : (sib >> 6) == 2? "*4" : "*8");
+	}
+
 	if (mod == 1) {
-		sprintf(s, " + 0x%02x", mem->read8(get_seg_adr(CS, ip + 1)));
+		sprintf(s, " + 0x%02x", mem->read8(get_seg_adr(CS, ++tip)));
 	} else if (mod == 2) {
-		sprintf(s, " + 0x%04x", mem->read16(get_seg_adr(CS, ip + 1)));
+		if (addrsize == size16) {
+			sprintf(s, " + 0x%04x", mem->read16(get_seg_adr(CS, ++tip)));
+		} else {
+			sprintf(s, " + 0x%08x", mem->read32(get_seg_adr(CS, ++tip)));
+		}
 	} else {
 		s[0] = '\0';
 	}
-	printf("%s%s]%s", str[rm], s, isDest?"\n\n":", ");
+	printf("%s%s]%s", str[addrsize][rm], s, isDest?"\n\n":", ");
 
 	if (isReg && !isDest) {
 		reg = modrm >> 3 & 7;
@@ -194,12 +216,12 @@ void CPU::DAS_prt_rmr_rrm(const char *s, bool isReg, bool isDest, bool isWord)
 	modrm = mem->read8(get_seg_adr(CS, ip));
 	DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 	DAS_pr("%s ", s);
-	DAS_modrm16(modrm, isReg, isDest, isWord);
+	DAS_modrm(modrm, isReg, isDest, isWord);
 }
 #else
 #define DAS_dump_reg()
 #define DAS_prt_post_op(n)
-#define DAS_modrm16(m, isR, isD, isW)
+#define DAS_modrm(m, isR, isD, isW)
 #define DAS_pr(...)
 #define DAS_prt_rmr_rrm()
 #endif // CORE_DAS
@@ -422,7 +444,7 @@ void CPU::exec() {
 	modrm = mem->read8(get_seg_adr(CS, ip));	\
 	DAS_prt_post_op(nr_disp_modrm(modrm) + 1);	\
 	DAS_pr(#STR" ");				\
-	DAS_modrm16(modrm, true, false, BWD##ISWORD);	\
+	DAS_modrm(modrm, true, false, BWD##ISWORD);	\
 	ip++;						\
 	src = genreg##BWD(modrm >> 3 & 7);		\
 	if ((modrm & 0xc0) == 0xc0) {			\
@@ -442,7 +464,7 @@ void CPU::exec() {
 	modrm = mem->read8(get_seg_adr(CS, ip));	\
 	DAS_prt_post_op(nr_disp_modrm(modrm) + 1);	\
 	DAS_pr(#STR" ");				\
-	DAS_modrm16(modrm, true, false, BWD##ISWORD);	\
+	DAS_modrm(modrm, true, false, BWD##ISWORD);	\
 	ip++;						\
 	dst = genreg##BWD(modrm >> 3 & 7);		\
 	src = modrm16##BWD(modrm);			\
@@ -547,7 +569,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	modrm = mem->read8(get_seg_adr(CS, ip));	\
 	DAS_prt_post_op(nr_disp_modrm(modrm) + 1);	\
 	DAS_pr(#STR" ");				\
-	DAS_modrm16(modrm, true, true, BWD##ISWORD);	\
+	DAS_modrm(modrm, true, true, BWD##ISWORD);	\
 	ip++;						\
 	greg = modrm >> 3 & 7;				\
 	dst = genreg##BWD(greg);			\
@@ -561,7 +583,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	modrm = mem->read8(get_seg_adr(CS, ip));	\
 	DAS_prt_post_op(nr_disp_modrm(modrm) + 1);	\
 	DAS_pr(#STR" ");				\
-	DAS_modrm16(modrm, true, false, BWD##ISWORD);	\
+	DAS_modrm(modrm, true, false, BWD##ISWORD);	\
 	rm = modrm & 7;					\
 	ip++;						\
 	src = genreg##BWD(modrm >> 3 & 7);		\
@@ -796,7 +818,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		modrm = mem->read8(get_seg_adr(CS, ip));
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("POP ");
-		DAS_modrm16(modrm, false, true, false);
+		DAS_modrm(modrm, false, true, false);
 		ip++;
 		if ((modrm & 0xc0) == 0xc0) {
 			genregw(modrm & 7) = mem->read16(get_seg_adr(SS, sp));
@@ -1063,7 +1085,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	modrm = mem->read8(get_seg_adr(CS, ip));	\
 	DAS_prt_post_op(nr_disp_modrm(modrm) + 1);	\
 	DAS_pr("CMP ");					\
-	DAS_modrm16(modrm, true, true, BWD##ISWORD);	\
+	DAS_modrm(modrm, true, true, BWD##ISWORD);	\
 	ip++;						\
 	dst = genreg##BWD(modrm >> 3 & 7);		\
 	src = modrm16##BWD(modrm);			\
@@ -1077,7 +1099,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	modrm = mem->read8(get_seg_adr(CS, ip));	\
 	DAS_prt_post_op(nr_disp_modrm(modrm) + 1);	\
 	DAS_pr("CMP ");					\
-	DAS_modrm16(modrm, true, false, BWD##ISWORD);	\
+	DAS_modrm(modrm, true, false, BWD##ISWORD);	\
 	rm = modrm & 7;					\
 	ip++;						\
 	src = genreg##BWD(modrm >> 3 & 7);		\
@@ -1221,7 +1243,8 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		case 0x01: // LGDT/LIDT
 			DAS_prt_post_op(2);
 			dst = mem->read16(get_seg_adr(CS, ++ip));
-			DAS_pr("%s\n\n", (dst >> 3 & 7) == 2?"LGDT":"LIDT");
+			DAS_pr("%s ", (dst >> 3 & 7) == 2?"LGDT":"LIDT");
+			DAS_modrm(dst, false, true, true);
 			ip++;
 			// xxx 中身をかく
 			break;
@@ -1383,7 +1406,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		subop = modrm >> 3 & 7;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 2);
 		DAS_pr("%s ", str8x[subop]);
-		DAS_modrm16(modrm, false, false, false);
+		DAS_modrm(modrm, false, false, false);
 		DAS_pr("0x%02x\n\n", mem->read8(get_seg_adr(CS, ip + nr_disp_modrm(modrm) + 1)));
 
 		switch (subop) {
@@ -1427,7 +1450,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		subop = modrm >> 3 & 7;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 3);
 		DAS_pr("%s ", str8x[subop]);
-		DAS_modrm16(modrm, false, false, true);
+		DAS_modrm(modrm, false, false, true);
 		DAS_pr("0x%04x\n\n", mem->read16(get_seg_adr(CS, ip + 1)));
 
 		switch (subop) {
@@ -1474,7 +1497,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		subop = modrm >> 3 & 7;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 2);
 		DAS_pr("%s ", str8x[subop]);
-		DAS_modrm16(modrm, false, false, true);
+		DAS_modrm(modrm, false, false, true);
 		DAS_pr("0x%02x\n\n", mem->read8(get_seg_adr(CS, ip + 1)));
 
 		switch (subop) {
@@ -1527,7 +1550,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	modrm = mem->read8(get_seg_adr(CS, ip));		\
 	DAS_prt_post_op(nr_disp_modrm(modrm) + 1);		\
 	DAS_pr("XCHG ");					\
-	DAS_modrm16(modrm, true, true, BWD##ISWORD);		\
+	DAS_modrm(modrm, true, true, BWD##ISWORD);		\
 	greg = modrm >> 3 & 7;					\
 	ip++;							\
 	if ((modrm & 0xc0) == 0xc0) {				\
@@ -1592,7 +1615,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		modrm = mem->read8(get_seg_adr(CS, ip)); // modR/Mを読み込む
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("MOV ");
-		DAS_modrm16(modrm, true, false, false);
+		DAS_modrm(modrm, true, false, false);
 		ip++;
 		if ((modrm & 0xc0) == 0xc0) {
 			genregb(modrm & 0x07) = genregb(modrm >> 3 & 7);
@@ -1605,7 +1628,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		modrm = mem->read8(get_seg_adr(CS, ip)); // modR/Mを読み込む
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("MOV ");
-		DAS_modrm16(modrm, true, false, true);
+		DAS_modrm(modrm, true, false, true);
 		ip++;
 		if ((modrm & 0xc0) == 0xc0) {
 			genregw(modrm & 0x07) = genregw(modrm >> 3 & 7);
@@ -1618,7 +1641,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		modrm = mem->read8(get_seg_adr(CS, ip)); // modR/Mを読み込む
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("MOV ");
-		DAS_modrm16(modrm, true, true, false);
+		DAS_modrm(modrm, true, true, false);
 		ip++;
 		genregb(modrm >> 3 & 7) = modrm16b(modrm);
 		break;
@@ -1627,7 +1650,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		modrm = mem->read8(get_seg_adr(CS, ip)); // modR/Mを読み込む
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("MOV ");
-		DAS_modrm16(modrm, true, true, true);
+		DAS_modrm(modrm, true, true, true);
 		ip++;
 		if (opsize == size16) {
 			genregw(modrm >> 3 & 7) = modrm16w(modrm);
@@ -1646,7 +1669,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		sreg = modrm >> 3 & 3;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("MOV ");
-		DAS_modrm16(modrm, false, false, true);
+		DAS_modrm(modrm, false, false, true);
 		DAS_pr("%s\n\n", segreg_name[sreg]);
 		ip++;
 		if ((modrm & 0xc0) == 0xc0) {
@@ -1667,7 +1690,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		greg = modrm >> 3 & 7;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("LEA ");
-		DAS_modrm16(modrm, true, true, true);
+		DAS_modrm(modrm, true, true, true);
 		ip++;
 		genregw(greg) = modrm16_ea(modrm);
 		break;
@@ -1682,7 +1705,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		sreg = modrm >> 3 & 3;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("MOV %s, ", segreg_name[sreg]);
-		DAS_modrm16(modrm, false, true, true);
+		DAS_modrm(modrm, false, true, true);
 		ip++;
 		update_segreg(sreg, modrm16w(modrm)); // セグメントはbaseも更新
 		break;
@@ -1780,7 +1803,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		modrm = mem->read8(get_seg_adr(CS, ip));
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("MOV ");
-		DAS_modrm16(modrm, false, false, false);
+		DAS_modrm(modrm, false, false, false);
 		DAS_pr("0x%02x\n\n", mem->read8(get_seg_adr(CS, ip + nr_disp_modrm(modrm) + 1)));
 		ip++;
 		if ((modrm & 0xc0) == 0xc0) {
@@ -1794,7 +1817,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		modrm = mem->read8(get_seg_adr(CS, ip));
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 2);
 		DAS_pr("MOV ");
-		DAS_modrm16(modrm, false, false, true);
+		DAS_modrm(modrm, false, false, true);
 		DAS_pr("0x%04x\n\n", mem->read16(get_seg_adr(CS, ip + nr_disp_modrm(modrm) + 1)));
 		ip++;
 		if ((modrm & 0xc0) == 0xc0) {
@@ -1812,7 +1835,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	modrm = mem->read8(get_seg_adr(CS, ip));		\
 	DAS_prt_post_op(nr_disp_modrm(modrm) + 1);		\
 	DAS_pr("TEST ");					\
-	DAS_modrm16(modrm, true, false, BWD##ISWORD);		\
+	DAS_modrm(modrm, true, false, BWD##ISWORD);		\
 	ip++;							\
 	if ((modrm & 0xc0) == 0xc0) {				\
 		dst = genreg##BWD(modrm & 0x07)			\
@@ -2074,7 +2097,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		ndisp = nr_disp_modrm(modrm);
 		DAS_prt_post_op(ndisp + 2);
 		DAS_pr("%s ", strdx[subop]);
-		DAS_modrm16(modrm, false, false, false);
+		DAS_modrm(modrm, false, false, false);
 		DAS_pr("0x%02x\n\n", mem->read8(get_seg_adr(CS, ip + ndisp + 1)));
 		switch (subop) {
 		// C0 /5 ib
@@ -2116,7 +2139,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		ndisp = nr_disp_modrm(modrm);
 		DAS_prt_post_op(ndisp + 2);
 		DAS_pr("%s ", strdx[subop]);
-		DAS_modrm16(modrm, false, false, true);
+		DAS_modrm(modrm, false, false, true);
 		DAS_pr("0x%02x\n\n", mem->read8(get_seg_adr(CS, ip + ndisp + 1)));
 		switch (subop) {
 		// C1 /4 ib
@@ -2279,7 +2302,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		subop = modrm >> 3 & 7;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("%s ", strdx[subop]);
-		DAS_modrm16(modrm, false, true, true);
+		DAS_modrm(modrm, false, true, true);
 		switch (subop) {
 		// D0 /4 r/m8
 		case 0x0: // ROL r/m8
@@ -2313,7 +2336,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		subop = modrm >> 3 & 7;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("%s ", strdx[subop]);
-		DAS_modrm16(modrm, false, true, true);
+		DAS_modrm(modrm, false, true, true);
 		switch (subop) {
 		// D1 /4 r/m16
 		case 0x0: // ROL r/m16
@@ -2347,7 +2370,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		subop = modrm >> 3 & 7;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("%s ", strdx[subop]);
-		DAS_modrm16(modrm, false, false, false);
+		DAS_modrm(modrm, false, false, false);
 		DAS_pr("CL\n\n");
 		switch (subop) {
 		case 0x0: // ROL r/m8, CL
@@ -2397,7 +2420,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		subop = modrm >> 3 & 7;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("%s ", strdx[subop]);
-		DAS_modrm16(modrm, false, false, true);
+		DAS_modrm(modrm, false, false, true);
 		DAS_pr("CL\n\n");
 		switch (subop) {
 		case 0x0: // ROL r/m16, CL
@@ -2482,7 +2505,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	DAS_prt_post_op(nr_disp_modrm(modrm) + 1);			\
 	DAS_pr(#STR" ");						\
 	ip++;								\
-	DAS_modrm16(modrm, true, true, true);				\
+	DAS_modrm(modrm, true, true, true);				\
 	if ((modrm & 0xc0) == 0xc0) {					\
 		/* xxx ソフトウェア例外らしい */			\
 	} else {/* xxx NP2に合わせたが、genregとESの順番が逆かも */	\
@@ -2749,7 +2772,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		subop = modrm >> 3 & 7;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + (subop < 2)?2:1);
 		DAS_pr("%s ", strf6[subop]);
-		DAS_modrm16(modrm, false, (subop < 2)?false:true, false);
+		DAS_modrm(modrm, false, (subop < 2)?false:true, false);
 		ip++;
 		switch (subop) {
 /*
@@ -2842,7 +2865,7 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 		subop = modrm >> 3 & 7;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + (subop < 2)?3:1);
 		DAS_pr("%s ", strf6[subop]);
-		DAS_modrm16(modrm, false, (subop < 2)?false:true, true);
+		DAS_modrm(modrm, false, (subop < 2)?false:true, true);
 		ip++;
 		switch (subop) {
 		case 0x0: // TEST r/m16, imm16 (TEST r/m32, imm32)
@@ -3069,7 +3092,7 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 		subop = modrm >> 3 & 7;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("%s ", strfe[subop]);
-		DAS_modrm16(modrm, false, true, false);
+		DAS_modrm(modrm, false, true, false);
 		ip++;
 		switch (subop) {
 		case 0: // INC r/m8
@@ -3088,7 +3111,7 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 		subop = modrm >> 3 & 7;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
 		DAS_pr("%s ", strff[subop]);
-		DAS_modrm16(modrm, false, true, true);
+		DAS_modrm(modrm, false, true, true);
 		ip++;
 		switch (subop) {
 		case 0: // INC r/m16
