@@ -198,9 +198,14 @@ private:
 	u8 flag_calb[0x200]; // 512バイト
 	u8 flag_calw[0x20000]; // 128Kバイト
 
-	u8 modrm_add_seg[3][8] = {{DS, DS, SS, SS, DS, DS, DS, DS},
-				  {DS, DS, SS, SS, DS, DS, SS, DS},
-				  {DS, DS, SS, SS, DS, DS, SS, DS}};
+	u8 modrm_add_seg[2][3][8] = {
+		{{DS, DS, SS, SS, DS, DS, DS, DS},
+		 {DS, DS, SS, SS, DS, DS, SS, DS},
+		 {DS, DS, SS, SS, DS, DS, SS, DS}},
+		{{DS, DS, DS, DS, DS, DS, DS, DS}, /* 32bit分は要確認 */
+		 {DS, DS, DS, DS, DS, SS, DS, DS},
+		 {DS, DS, DS, DS, DS, SS, DS, DS}}
+	};
 
 	u8 sar_bitb[8] = {0x00, 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe};
 	u16 sar_bitw[16] = {0x0000, 0x8000, 0xc000, 0xe000, 0xf000, 0xf800, 0xfc00, 0xfe00, 0xff00, 0xff80, 0xffc0, 0xffe0, 0xfff0, 0xfff8, 0xfffc, 0xfffe};

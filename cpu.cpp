@@ -146,6 +146,7 @@ void CPU::DAS_modrm(u8 modrm, bool isReg, bool isDest, bool isWord) {
 	  {"[EAX", "[ECX", "[EDX", "[EBX", "[EAX + EBX*8", "[EBP", "[ESI", "[EDI", }
 	};
 	char s[] = " + 0x????????";
+	char sib_scale_str[4][3] = {"", "*2", "*4", "*8"};
 
 	REGSIZE regsize;
 	regsize = isWord? (opsize == size16? word : dword) : byte;
@@ -186,7 +187,7 @@ void CPU::DAS_modrm(u8 modrm, bool isReg, bool isDest, bool isWord) {
 	// <SIB>
 	if (addrsize == size32 && rm == 4) {
 		sib = mem->read8(get_seg_adr(CS, ++tip));
-		sprintf(str[1][4], "[%s + %s%s", genreg_name[1][sib & 3], genreg_name[1][sib >> 3 & 3], (sib >> 6) == 0? "" : (sib >> 6) == 1? "*2" : (sib >> 6) == 2? "*4" : "*8");
+		sprintf(str[1][4], "[%s + %s%s", genreg_name[1][sib & 7], genreg_name[1][sib >> 3 & 7], sib_scale_str[sib >> 6]);
 	}
 
 	if (mod == 1) {
@@ -299,7 +300,57 @@ u16 CPU::modrm16_ea(u8 modrm)
 
 u32 CPU::modrm32_ea(u8 modrm)
 {
-	// xxx 後で実装する
+	u8 sib;
+	u16 mod;
+	u32 tmp32;
+	u32 sib_scale[] = {0, 2, 4, 8};
+
+	mod = modrm >> 6;
+
+	switch (modrm & 7) {
+	case 0:
+		tmp32 = eax;
+		break;
+	case 1:
+		tmp32 = ecx;
+		break;
+	case 2:
+		tmp32 = edx;
+		break;
+	case 3:
+		tmp32 = ebx;
+		break;
+	case 4: // <SIB>
+		sib = mem->read8(get_seg_adr(CS, ip++));
+		tmp32 = genregd(sib & 7) + genregd(sib >> 3 & 7) * sib_scale[sib >> 6];
+		break;
+	case 5:
+		// [disp32]
+		if (mod == 0) {
+			tmp32 = mem->read32(get_seg_adr(CS, ip));
+			ip += 4;
+			break;
+		}
+		tmp32 = ebp;
+		break;
+	case 6:
+		tmp32 = esi;
+		break;
+	case 7:
+		tmp32 = edi;
+		break;
+	}
+
+	// xxx dispは符号つきなので考慮しなくてはならない
+	if (mod == 1) {
+		tmp32 += mem->read8(get_seg_adr(CS, ip));
+		ip++;
+	} else if (mod == 2) {
+		tmp32 += mem->read32(get_seg_adr(CS, ip));
+		ip += 4;
+	}
+
+	return tmp32;
 }
 
 // modが11でないことはあらかじめチェックしておくこと
@@ -310,17 +361,18 @@ u32 CPU::modrm32_ea(u8 modrm)
 u32 CPU::modrm16_seg_ea(u8 modrm)
 {
 	return modrm16_ea(modrm)
-		+ sdcr[modrm_add_seg[modrm >> 6][modrm & 7]].base;
+		+ sdcr[modrm_add_seg[0][modrm >> 6][modrm & 7]].base;
 }
 
 u32 CPU::modrm_seg_ea(u8 modrm)
 {
 	if (addrsize == size16) {
 		return modrm16_ea(modrm)
-			+ sdcr[modrm_add_seg[modrm >> 6][modrm & 7]].base;
+			+ sdcr[modrm_add_seg[0][modrm >> 6][modrm & 7]].base;
 	} else {
+		// xxxSIBのベースがもしEBPだったらセグメントはCS?
 		return modrm32_ea(modrm)
-			+ sdcr[modrm_add_seg[modrm >> 6][modrm & 7]].base;
+			+ sdcr[modrm_add_seg[1][modrm >> 6][modrm & 7]].base;
 	}
 }
 
