@@ -117,11 +117,63 @@ private:
 		{"AX", "CX", "DX", "BX", "SP", "BP", "SI", "DI"},
 		{"EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI"}
 	};
-	enum REGSIZE {byte, word, dword};
+	enum REGSIZE {byte, word, dword, fword};
 
 #define genregb(n) *genregb[n]
 	// al, cl, dl, bl, ah, ch, dh, bhの順に取り出す
 	u8* genregb[8] = {&al, &cl, &dl, &bl, &ah, &ch, &dh, &bh};
+
+/*
+  Global Descriptor Table Register
+  47               31                               0
+  +----------------+--------------------------------+
+  |     Limit      |           Base Address         |
+  +----------------+--------------------------------+
+           |                        |
++-----------------------------------+
+|          |
+|          +------------------------------------------------------------------+
+|  Descriptor Table                                                           |
+|     0       1      2       3       4        5           6             7     V
++->+------+-------+------+-------+--------+-------+-----------------+--------+-
+   |Lim7:0|Lim15:8|Bas7:0|Bas15:8|Bas23:16|Attr7:0|Attr12:8|Lim19:16|Bas31:24|A
+   +------+-------+------+-------+--------+-------+-----------------+--------+|
+   |Lim7:0|Lim15:8|Bas7:0|Bas15:8|Bas23:16|Attr7:0|Attr12:8|Lim19:16|Bas31:24||
+   +------+-------+------+-------+--------+-------+-----------------+--------+|
+                                      :                                       |
+   +------+-------+------+-------+--------+-------+-----------------+--------+|
+   |Lim7:0|Lim15:8|Bas7:0|Bas15:8|Bas23:16|Attr7:0|Attr12:8|Lim19:16|Bas31:24|V
+   +------+-------+------+-------+--------+-------+-----------------+--------+-
+    Lim:Limit, Bas:Base Address, Attr:Attribute
+
+   Attribute
+   11 10  9  8  7 65  4  321 0
+   +-----------+--------------+
+   |G|D/B|0|AVL|P|DPL|S|Type|A|
+   +-----------+--------------+
+    G: 0:SegSizeは1B単位(1B～1MB) / 1:SegSizeは4KB単位(4KB～4GB)
+    D/B: 1:32bit / 0:16bit
+    AVL: OSが自由に使用可能
+    P: 1:セグメントがメモリに存在する / 0:セグメントがメモリに存在しない
+    DPL: 特権レベル
+    S: 0:システムセグメント / 1:コードまたはデータセグメント
+    A: セグメントがアクセスされた
+    Type: 0:読み出し専用データセグメント / 1:読み書き可能データセグメント
+          2:読み出し専用スタックセグメント / 3:読み書き可能スタックセグメント
+          4:実行専用コードセグメント / 5: 実行及び読み出し可能コードセグメント
+          6: 実行専用コンフォーミングコードセグメント
+          7:実行及び読み出し可能コンフォーミングコードセグメント
+
+    参考文献 (3), (4)p.193
+
+ */
+
+	struct _gdtr {
+		u16 limit;
+		u32 base;
+	} gdtr;
+
+
 
 // セグメントレジスタ
 #define NR_SEGREG 6
@@ -207,6 +259,14 @@ private:
 		 {DS, DS, DS, DS, DS, SS, DS, DS}}
 	};
 
+/*
+  Control Register 0
+
+
+ */
+	u32 cr[4];
+
+
 	u8 sar_bitb[8] = {0x00, 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe};
 	u16 sar_bitw[16] = {0x0000, 0x8000, 0xc000, 0xe000, 0xf000, 0xf800, 0xfc00, 0xfe00, 0xff00, 0xff80, 0xffc0, 0xffe0, 0xfff0, 0xfff8, 0xfffc, 0xfffe};
 
@@ -229,8 +289,8 @@ private:
 
 	void DAS_dump_reg();
 	void DAS_prt_post_op(u8 n);
-	void DAS_modrm(u8 modrm, bool isReg, bool isDest, bool isWord);
-	void DAS_prt_rmr_rrm(const char *s, bool isReg, bool isDest, bool isWord);
+	void DAS_modrm(u8 modrm, bool isReg, bool isDest, REGSIZE regsize);
+	void DAS_prt_rmr_rrm(const char *s, bool isReg, bool isDest, REGSIZE regsize);
 #endif
 	u8 nr_disp_modrm(u8 modrm);
 	u16 modrm16_ea(u8 modrm);
@@ -250,3 +310,5 @@ public:
 // 参考文献
 // (1) https://www.pcjs.org/docs/x86/ops/LOADALL/
 // (2) https://www.intel.co.jp/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-system-programming-manual-325384.pdf
+// (3)  http://caspar.hazymoon.jp/OpenBSD/annex/intel_segment.html
+// (4) はじめて読む486 株式会社アスキー
