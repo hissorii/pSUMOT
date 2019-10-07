@@ -193,6 +193,7 @@ private:
 	struct _sdcr {
 		u32 limit;
 		u32 base; // base address
+		u16 attr;
 		// Access Rights (実際は10ビットにpackされているが、使うたびに
 		// bit演算したくないので、u8型に分解して使いやすくしておく)
 		u8 present;
@@ -312,3 +313,4 @@ public:
 // (2) https://www.intel.co.jp/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-system-programming-manual-325384.pdf
 // (3)  http://caspar.hazymoon.jp/OpenBSD/annex/intel_segment.html
 // (4) はじめて読む486 株式会社アスキー
+// (5) 80x86/80x86 ファミリー・テクニカルハンドブック

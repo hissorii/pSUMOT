@@ -40,19 +40,6 @@ CPU::CPU(BUS* bus) {
 	// そのため、ダブルワード同士の演算によるフラグはその都度算出する。
 }
 
-// - 引数aにセグメントを加算したアドレスを返却する
-// - 386では、セグメント加算は、プロテクトモードでもリアルモードでも、
-//   セグメントディスクリプターキャッシュ内のbase addressに対して行う
-u32 CPU::get_seg_adr(const SEGREG seg, const u16 a) {
-	return sdcr[seg].base + a;
-}
-
-void CPU::update_segreg(const u8 seg, const u16 n) {
-	// リアルモードでは、SDCRのbaseを更新するだけ
-	segreg[seg] = n;
-	sdcr[seg].base = n << 4;
-}
-
 void CPU::reset() {
 	opsize = size16;
 	addrsize = size16;
@@ -88,7 +75,7 @@ esp:000002de ebp:b6f7b498 esi:b6f9eb58 edi:bea69340
 cs:fc00 ds:0000 es:0000 ss:0000 fs:0000 gs:0000
 */
 void CPU::DAS_dump_reg() {
-	int i, j, startadr;
+	int i;
 	static int step = 1;
 
 	for (i = 0; i < 4; i++) {
@@ -108,6 +95,8 @@ void CPU::DAS_dump_reg() {
 	printf("         cr0:%08x", cr[0]);
 	printf("\n\n");
 
+#if 0
+	int j, startadr;
 	if (step == 120) {
                 for (i = 0; i < 32; i++) {
                         printf("0x%02x ", mem->read8(0xf7fb0 + i));
@@ -125,6 +114,7 @@ void CPU::DAS_dump_reg() {
 			printf("\n");
                 }
 	}
+#endif
 }
 
 void CPU::DAS_prt_post_op(u8 n) {
@@ -405,6 +395,60 @@ u8 CPU::modrm16b(u8 modrm)
 		return *genregb[modrm & 7];
 	}
 	return mem->read8(modrm16_seg_ea(modrm));
+}
+
+// - 引数aにセグメントを加算したアドレスを返却する
+// - 386では、セグメント加算は、プロテクトモードでもリアルモードでも、
+//   セグメントディスクリプターキャッシュ内のbase addressに対して行う
+u32 CPU::get_seg_adr(const SEGREG seg, const u16 a) {
+	return sdcr[seg].base + a;
+}
+
+void CPU::update_segreg(const u8 seg, const u16 n) {
+
+	segreg[seg] = n;
+
+	// リアルモードでは、SDCRのbaseを更新するだけ
+	if (isRealMode) {
+		sdcr[seg].base = n << 4;
+		return;
+	}
+
+	// プロテクトモード
+	u32 tmpadr, dst;
+
+	// セグメントで指定されるディスクリプタの戦先頭アドレス
+	tmpadr = gdtr.base + (n & 0xf8);
+	dst = (mem->read32(tmpadr + 2) & 0x00ffffff)
+		+ (mem->read8(tmpadr + 7) << 24);
+	DAS_pr("base=0x%08x", dst);
+	sdcr[seg].base = dst;
+
+	dst = mem->read8(tmpadr + 5) + ((mem->read8(tmpadr + 6) & 0xf0) << 4);
+	DAS_pr("\tAttr=0x%04x", (u16)dst);
+	sdcr[seg].attr = (u16)dst;
+
+	dst = mem->read16(tmpadr) + ((mem->read8(tmpadr + 6) & 0xf) << 16);
+	if (sdcr[seg].attr & 0x800) {
+		dst = dst << 12;
+	}
+	DAS_pr("\tlimit=0x%08x\n", dst);
+	sdcr[seg].limit = dst;
+
+	if (seg != CS) {
+		return;
+	}
+
+	// 参考文献(5)p.93 D(Default operation size)
+	// DビットはCSデスクリプタでのみ意味があり、この設定はオーバーライド
+	// プリフィックスでオーバーライドされる
+	if (sdcr[seg].attr & 0x400) {
+		opsize = size32;
+		addrsize = size32;
+	} else {
+		opsize = size16;
+		addrsize = size16;
+	}
 }
 
 void CPU::exec() {
@@ -1313,16 +1357,22 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 			modrm = mem->read8(get_seg_adr(CS, ++ip));
 			DAS_pr("MOV ");
 			DAS_modrm(modrm, false, false, dword);
-			DAS_pr("CR%d\n\n", modrm >> 3 & 7);
-			genregd(modrm & 7) = cr[modrm >> 3 & 7];
+			tmpb = modrm >> 3 & 7;
+			DAS_pr("CR%d\n\n", tmpb);
+			genregd(modrm & 7) = cr[tmpb];
 			ip++;
 			break;
 		case 0x22: // MOV CR0,r32
 			DAS_prt_post_op(2);
 			modrm = mem->read8(get_seg_adr(CS, ++ip));
-			DAS_pr("MOV CR%d, ", modrm >> 3 & 7);
+			tmpb = modrm >> 3 & 7;
+			DAS_pr("MOV CR%d, ", tmpb);
 			DAS_modrm(modrm, false, true, dword);
-			cr[modrm >> 3 & 7] = genregd(modrm & 7);
+			cr[tmpb] = genregd(modrm & 7);
+			if (tmpb == 0 && isRealMode && cr[0] & 1) {
+				isRealMode = false;
+				DAS_pr("RealMode -> ProtectedMode\n");
+			}
 			ip++;
 			break;
 		case 0x84: // JE rel16 (JE rel32)
@@ -2829,9 +2879,9 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		DAS_prt_post_op(4);
 		warg1 = mem->read16(get_seg_adr(CS, ip));
 		warg2 = mem->read16(get_seg_adr(CS, ip + 2));
+		DAS_pr("JMP %04x:%04x\n\n", warg2, warg1);
 		update_segreg(CS, warg2);
 		ip = warg1;
-		DAS_pr("JMP %04x:%04x\n\n", warg2, warg1);
 		break;
 /*
 +--------+--------+
@@ -3061,7 +3111,7 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 		DAS_prt_post_op(0);
 		DAS_pr("Ope Size Override\n\n");
 		opsize_ovride = true;
-		opsize = isRealMode? size32 : size16;
+		opsize = isRealMode? size32 : (sdcr[CS].attr & 0x400)? size16 : size32;
 		return; // リターンする
 
 /*************** アドレスサイズオーバーライドプリフィックス ***************/
@@ -3070,7 +3120,7 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 		DAS_prt_post_op(0);
 		DAS_pr("Addr Size Override\n\n");
 		addrsize_ovride = true;
-		addrsize = isRealMode? size32 : size16;
+		addrsize = isRealMode? size32 : (sdcr[CS].attr & 0x400)? size16 : size32;
 		return; // リターンする
 
 /*************** LOCK ***************/
@@ -3269,6 +3319,6 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 	addrsize_ovride = false;
 	repne_prefix = false;
 	repe_prefix = false;
-	opsize = isRealMode? size16 : size32;
-	addrsize = isRealMode? size16 : size32;
+	opsize = isRealMode? size16 : (sdcr[CS].attr & 0x400)? size32 : size16;
+	addrsize = isRealMode? size16 : (sdcr[CS].attr & 0x400)? size32 : size16;
 }
