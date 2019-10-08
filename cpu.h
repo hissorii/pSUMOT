@@ -259,7 +259,7 @@ private:
 		 {DS, DS, DS, DS, DS, SS, DS, DS},
 		 {DS, DS, DS, DS, DS, SS, DS, DS}}
 	};
-
+	u8 modrm_add_sib[8] = {DS, DS, DS, DS, SS, SS, DS, DS};
 /*
   Control Register 0
 
@@ -296,11 +296,10 @@ private:
 	u8 nr_disp_modrm(u8 modrm);
 	u16 modrm16_ea(u8 modrm);
 	u32 modrm32_ea(u8 modrm);
-	u32 modrm16_seg_ea(u8 modrm);
 	u32 modrm_seg_ea(u8 modrm);
-	u32 modrm16d(u8 modrm);
-	u16 modrm16w(u8 modrm);
-	u8 modrm16b(u8 modrm);
+	u32 modrmd(u8 modrm);
+	u16 modrmw(u8 modrm);
+	u8 modrmb(u8 modrm);
 
 public:
 	CPU(BUS* bus);
@@ -308,9 +307,14 @@ public:
 	void exec();
 };
 
-// 参考文献
-// (1) https://www.pcjs.org/docs/x86/ops/LOADALL/
-// (2) https://www.intel.co.jp/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-system-programming-manual-325384.pdf
-// (3)  http://caspar.hazymoon.jp/OpenBSD/annex/intel_segment.html
-// (4) はじめて読む486 株式会社アスキー
-// (5) 80x86/80x86 ファミリー・テクニカルハンドブック
+/* 参考文献
+   (1) https://www.pcjs.org/docs/x86/ops/LOADALL/
+   (2) https://www.intel.co.jp/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-system-programming-manual-325384.pdf
+   (3)  http://caspar.hazymoon.jp/OpenBSD/annex/intel_segment.html
+   (4) はじめて読む486 株式会社アスキー
+   (5) 80x86/80x86 ファミリー・テクニカルハンドブック
+   (6) IA-32 インテル アーキテクチャ ソフトウェア・デベロッパーズ・ マニュアル 上巻
+   (7) IA-32 インテル アーキテクチャ ソフトウェア・デベロッパーズ・ マニュアル 中巻A
+   (8) IA-32 インテル アーキテクチャ ソフトウェア・デベロッパーズ・ マニュアル 中巻B
+   (9) IA-32 インテル アーキテクチャ ソフトウェア・デベロッパーズ・ マニュアル 下巻
+*/
