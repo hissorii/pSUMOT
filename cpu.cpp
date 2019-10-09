@@ -104,8 +104,8 @@ void CPU::DAS_dump_reg() {
                 }
                 printf("\n");
         }
-	if (step == 45497) {
-		startadr = 0xfc000;
+	if (step == 45543) {
+		startadr = 0xf7f00;
 		for (i = 0; i < 16; i++) {
 			printf("%04x ", i * 16 + startadr);
 			for (j = 0; j < 16; j++) {
@@ -762,28 +762,31 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 
 /******************** PUSH ********************/
 // xxxセグメントオーバーライドされていても、call, pusha, enterではSSを使うらしい
-#define PUSHW0(d)						\
-	if (opsize == size16) {					\
-		sp -= 2;					\
-		mem->write16((segreg[SS] << 4) + sp, (u16)(d));	\
-	} else {						\
-		sp -= 4;					\
-		mem->write32((segreg[SS] << 4) + sp, d);	\
-	}
+#define PUSHW0(d)					\
+	sp -= 2;					\
+	mem->write16((segreg[SS] << 4) + sp, (u16)(d));
 
-#define PUSHW(d)					\
-	if (opsize == size16) {				\
-		sp -= 2;				\
-		mem->write16(get_seg_adr(SS, sp), d);	\
-	} else {					\
-		sp -= 4;				\
-		mem->write32(get_seg_adr(SS, sp), d);	\
-	}
+#define PUSHD0(d)				\
+	sp -= 4;				\
+	mem->write32((segreg[SS] << 4) + sp, d);
+
+#define PUSHW(d)				\
+	sp -= 2;				\
+	mem->write16(get_seg_adr(SS, sp), d);
+
+#define PUSHD(d)				\
+	sp -= 4;				\
+	mem->write32(get_seg_adr(SS, sp), d);
 
 #define PUSHW_GENREG(reg)		\
 	DAS_prt_post_op(0);		\
 	DAS_pr("PUSH "#reg"\n\n");	\
 	PUSHW(reg)
+
+#define PUSHD_GENREG(reg)		\
+	DAS_prt_post_op(0);		\
+	DAS_pr("PUSH "#reg"\n\n");	\
+	PUSHD(reg)
 
 #define PUSH_SEG(seg)			\
 	DAS_prt_post_op(0);		\
@@ -810,57 +813,116 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		PUSH_SEG(DS);
 		break;
 
-	case 0x50: // PUSH AX
-		PUSHW_GENREG(ax);
+	case 0x50: // PUSH AX (PUSH EAX)
+		if (opsize == size16) {
+			PUSHW_GENREG(ax);
+		} else {
+			PUSHD_GENREG(eax);
+		}
 		break;
-	case 0x51: // PUSH CX
-		PUSHW_GENREG(cx);
+	case 0x51: // PUSH CX (PUSH ECX)
+		if (opsize == size16) {
+			PUSHW_GENREG(cx);
+		} else {
+			PUSHD_GENREG(ecx);
+		}
 		break;
-	case 0x52: // PUSH DX
-		PUSHW_GENREG(dx);
+	case 0x52: // PUSH DX (PUSH EDX)
+		if (opsize == size16) {
+			PUSHW_GENREG(dx);
+		} else {
+			PUSHD_GENREG(edx);
+		}
 		break;
-	case 0x53: // PUSH BX
-		PUSHW_GENREG(bx);
+	case 0x53: // PUSH BX (PUSH EBX)
+		if (opsize == size16) {
+			PUSHW_GENREG(bx);
+		} else {
+			PUSHD_GENREG(ebx);
+		}
 		break;
-	case 0x54: // PUSH SP
-		PUSHW_GENREG(sp);
+	case 0x54: // PUSH SP (PUSH ESP)
+		if (opsize == size16) {
+			PUSHW_GENREG(sp);
+		} else {
+			PUSHD_GENREG(esp);
+		}
 		break;
-	case 0x55: // PUSH BP
-		PUSHW_GENREG(bp);
+	case 0x55: // PUSH BP (PUSH EBP)
+		if (opsize == size16) {
+			PUSHW_GENREG(bp);
+		} else {
+			PUSHD_GENREG(ebp);
+		}
 		break;
-	case 0x56: // PUSH SI
-		PUSHW_GENREG(si);
+	case 0x56: // PUSH SI (PUSH ESI)
+		if (opsize == size16) {
+			PUSHW_GENREG(si);
+		} else {
+			PUSHD_GENREG(esi);
+		}
 		break;
-	case 0x57: // PUSH DI
-		PUSHW_GENREG(di);
+	case 0x57: // PUSH DI (PUSH EDI)
+		if (opsize == size16) {
+			PUSHW_GENREG(di);
+		} else {
+			PUSHD_GENREG(edi);
+		}
 		break;
 
 	case 0x60: // PUSHA (PUSHAD)
 		DAS_prt_post_op(0);
-		DAS_pr("PUSHA\n\n");
-		dst = sp;
-		PUSHW0(ax);
-		PUSHW0(cx);
-		PUSHW0(dx);
-		PUSHW0(bx);
-		PUSHW0(dst);
-		PUSHW0(bp);
-		PUSHW0(si);
-		PUSHW0(di);
+		if (opsize == size16) {
+			DAS_pr("PUSHA\n\n");
+			dst = sp;
+			PUSHW0(ax);
+			PUSHW0(cx);
+			PUSHW0(dx);
+			PUSHW0(bx);
+			PUSHW0(dst);
+			PUSHW0(bp);
+			PUSHW0(si);
+			PUSHW0(di);
+		} else {
+			DAS_pr("PUSHAD\n\n");
+			dst = esp;
+			PUSHD0(eax);
+			PUSHD0(ecx);
+			PUSHD0(edx);
+			PUSHD0(ebx);
+			PUSHD0(dst);
+			PUSHD0(ebp);
+			PUSHD0(esi);
+			PUSHD0(edi);
+		}
 		break;
 
 	case 0x68: // PUSH imm16 (PUSH imm32)
-		DAS_prt_post_op(2);
-		dst = mem->read16(get_seg_adr(CS, ip));
-		DAS_pr("PUSH 0x%04x\n\n", dst);
-		PUSHW(dst);
-		ip += 2;
+		if (opsize == size16) {
+			DAS_prt_post_op(2);
+			dst = mem->read16(get_seg_adr(CS, ip));
+			DAS_pr("PUSH 0x%04x\n\n", dst);
+			PUSHW(dst);
+			ip += 2;
+		} else {
+			DAS_prt_post_op(4);
+			dst = mem->read32(get_seg_adr(CS, ip));
+			DAS_pr("PUSH 0x%08x\n\n", dst);
+			PUSHD(dst);
+			ip += 4;
+		}
 		break;
 
 	case 0x9c: // PUSHF (PUSHFD)
 		DAS_prt_post_op(0);
-		DAS_pr("PUSHF\n\n");
-		PUSHW(flagu8 << 8 | flag8);
+		if (opsize == size16) {
+			DAS_pr("PUSHF\n\n");
+			PUSHW(flagu8 << 8 | flag8);
+		} else {
+			DAS_pr("PUSHFD\n\n");
+			PUSHD(flagu8 << 8 | flag8);
+			// xxx ちゃんとやる
+		}
 		break;
 
 /******************** POP ********************/
@@ -869,14 +931,27 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	d = mem->read16((segreg[SS] << 4) + sp);\
 	sp += 2;
 
+#define POPD0(d)				\
+	d = mem->read32((segreg[SS] << 4) + sp);\
+	sp += 4;
+
 #define POPW(d)					\
 	d = mem->read16(get_seg_adr(SS, sp));	\
 	sp += 2;
+
+#define POPD(d)					\
+	d = mem->read32(get_seg_adr(SS, sp));	\
+	sp += 4;
 
 #define POPW_GENREG(reg)		\
 	DAS_prt_post_op(0);		\
 	DAS_pr("POP "#reg"\n\n");	\
 	POPW(reg)
+
+#define POPD_GENREG(reg)		\
+	DAS_prt_post_op(0);		\
+	DAS_pr("POP "#reg"\n\n");	\
+	POPD(reg)
 
 #define POP_SEG(seg)			\
 	DAS_prt_post_op(0);		\
@@ -902,42 +977,86 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		POP_SEG(DS);
 		break;
 
-	case 0x58: // POP AX
-		POPW_GENREG(ax);
+	case 0x58: // POP AX (POP EAX)
+		if (opsize == size16) {
+			POPW_GENREG(ax);
+		} else {
+			POPD_GENREG(eax);
+		}
 		break;
-	case 0x59: // POP CX
-		POPW_GENREG(cx);
+	case 0x59: // POP CX (POP ECX)
+		if (opsize == size16) {
+			POPW_GENREG(cx);
+		} else {
+			POPD_GENREG(ecx);
+		}
 		break;
-	case 0x5a: // POP DX
-		POPW_GENREG(dx);
+	case 0x5a: // POP DX (POP EDX)
+		if (opsize == size16) {
+			POPW_GENREG(dx);
+		} else {
+			POPD_GENREG(edx);
+		}
 		break;
-	case 0x5b: // POP BX
-		POPW_GENREG(bx);
+	case 0x5b: // POP BX (POP EBX)
+		if (opsize == size16) {
+			POPW_GENREG(bx);
+		} else {
+			POPD_GENREG(ebx);
+		}
 		break;
-	case 0x5c: // POP SP
-		POPW_GENREG(sp);
+	case 0x5c: // POP SP (POP ESP)
+		if (opsize == size16) {
+			POPW_GENREG(sp);
+		} else {
+			POPD_GENREG(esp);
+		}
 		break;
-	case 0x5d: // POP BP
-		POPW_GENREG(bp);
+	case 0x5d: // POP BP (POP EBP)
+		if (opsize == size16) {
+			POPW_GENREG(bp);
+		} else {
+			POPD_GENREG(ebp);
+		}
 		break;
-	case 0x5e: // POP SI
-		POPW_GENREG(si);
+	case 0x5e: // POP SI (POP ESI)
+		if (opsize == size16) {
+			POPW_GENREG(si);
+		} else {
+			POPD_GENREG(esi);
+		}
 		break;
-	case 0x5f: // POP DI
-		POPW_GENREG(di);
+	case 0x5f: // POP DI (POP EDI)
+		if (opsize == size16) {
+			POPW_GENREG(di);
+		} else {
+			POPD_GENREG(edi);
+		}
 		break;
 
 	case 0x61: // POPA (POPAD)
 		DAS_prt_post_op(0);
-		DAS_pr("POPA\n\n");
-		POPW0(di);
-		POPW0(si);
-		POPW0(bp);
-		sp += 2;
-		POPW0(bx);
-		POPW0(dx);
-		POPW0(cx);
-		POPW0(ax);
+		if (opsize == size16) {
+			DAS_pr("POPA\n\n");
+			POPW0(di);
+			POPW0(si);
+			POPW0(bp);
+			sp += 2;
+			POPW0(bx);
+			POPW0(dx);
+			POPW0(cx);
+			POPW0(ax);
+		} else {
+			DAS_pr("POPAD\n\n");
+			POPD0(edi);
+			POPD0(esi);
+			POPD0(ebp);
+			sp += 4;
+			POPD0(ebx);
+			POPD0(edx);
+			POPD0(ecx);
+			POPD0(eax);
+		}
 		break;
 
 /*
@@ -963,10 +1082,18 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 
 	case 0x9d: // POPF (POPFD)
 		DAS_prt_post_op(0);
-		DAS_pr("POPF\n\n");
-		POPW(dst);
-		flagu8 = (u8)(dst >> 8);
-		flag8  = dst & 0xff;
+		if (opsize == size16) {
+			DAS_pr("POPF\n\n");
+			POPW(dst);
+			flagu8 = (u8)(dst >> 8);
+			flag8  = dst & 0xff;
+		} else {
+			DAS_pr("POPFD\n\n");
+			POPD(dst);
+			flagu8 = (u8)(dst >> 8);
+			flag8  = dst & 0xff;
+			// xxx ちゃんとやる
+		}
 		break;
 
 /******************** AND ********************/
@@ -1438,6 +1565,15 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 			break;
 		case 0xa9: // POP GS
 			POP_SEG2(GS);
+			break;
+		case 0xb7: // MOVZX r32,r/m16
+			modrm = mem->read8(get_seg_adr(CS, ++ip));
+			DAS_prt_post_op(nr_disp_modrm(modrm) + 2);
+			DAS_pr("MOVZX ");
+			// xxx 現状 MOVZX ESP, EAXの様にsrcが32bit表記になる
+			DAS_modrm(modrm, true, true, dword);
+			ip++;
+			genregd(modrm >> 3 & 7) = modrmw(modrm);
 			break;
 		default:
 			DAS_pr("xxxxx\n\n");
@@ -2789,7 +2925,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	        subop = mem->read8(get_seg_adr(CS, ip));
 		switch (subop) {
 		case 0xe3: // FNINIT
-			printf("FNINIT\n\n");
+			DAS_pr("FNINIT\n\n");
 			// nothing to do
 			ip++;
 			break;
