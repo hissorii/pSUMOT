@@ -205,7 +205,22 @@ private:
 		u8 d; // Default operation size
 	} sdcr[NR_SEGREG];
 
-	u16 ip;			    // インストラクションポインタ
+// インストラクションポインタ
+#define eip ueip.ip32
+#define ip ueip.ip16.ip16l
+
+	union _eip {
+		u32 ip32;
+		struct {
+#ifdef BIG_ENDIAN
+			u16 ip16h;
+			u16 ip16l;
+#else
+			u16 ip16l;
+			u16 ip16h;
+#endif
+		} ip16;
+	} ueip;
 
 /*
   フラグレジスタ
