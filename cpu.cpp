@@ -131,14 +131,14 @@ void CPU::DAS_prt_post_op(u8 n) {
 //   ただし、ワード指定でもopsizeがsize32の場合は関数内でダブルワードに変換する
 // POP m16でregのないModR/Mでコンマ不要の場合はisReg=false, isDest=trueにする
 void CPU::DAS_modrm(u8 modrm, bool isReg, bool isDest, REGSIZE regsize) {
-	u8 mod, reg, rm, sib, idx;
+	u8 mod, reg, rm, sib, idx, base;
 	u32 tip; // tmp ip
 #define NR_RM 8
-	char str[2][NR_RM][13] = {
+	char addressing_str[2][NR_RM][13] = {
 	  {"[BX + SI", "[BX + DI", "[BP + SI", "[BP + DI", "[SI", "[DI", "[BP", "[BX", },
 	  {"[EAX", "[ECX", "[EDX", "[EBX", "[EAX + EBX*8", "[EBP", "[ESI", "[EDI", }
 	};
-	char s[] = " + 0x????????";
+	char disp[] = " + 0x????????";
 	char sib_scale_str[4][3] = {"", "*2", "*4", "*8"};
 
 	if (regsize == word && opsize == size32) {
@@ -183,25 +183,28 @@ void CPU::DAS_modrm(u8 modrm, bool isReg, bool isDest, REGSIZE regsize) {
 	if (addrsize == size32 && rm == 4) {
 		sib = mem->read8(get_seg_adr(CS, ++tip));
 		idx = sib >> 3 & 7;
-		if (idx != 4) {
-			sprintf(str[1][4], "[%s + %s%s", genreg_name[2][sib & 7], genreg_name[2][idx], sib_scale_str[sib >> 6]);
-		} else {
-			sprintf(str[1][4], "[%s", genreg_name[2][sib & 7]);
-		}
+		base = sib & 7;
+		sprintf(addressing_str[1][4],
+			"[%s%s%s%s",
+			(base != 5)? genreg_name[2][sib & 7] : mod? "EBP" : "",
+			((base != 5 || mod) && idx != 4)? " + " : "",
+			(idx != 4)? genreg_name[2][idx] :  "",
+			(idx != 4)? sib_scale_str[sib >> 6] : "");
 	}
 
+	// + disp
 	if (mod == 1) {
-		sprintf(s, " + 0x%02x", mem->read8(get_seg_adr(CS, ++tip)));
+		sprintf(disp, " + 0x%02x", mem->read8(get_seg_adr(CS, ++tip)));
 	} else if (mod == 2) {
 		if (addrsize == size16) {
-			sprintf(s, " + 0x%04x", mem->read16(get_seg_adr(CS, ++tip)));
+			sprintf(disp, " + 0x%04x", mem->read16(get_seg_adr(CS, ++tip)));
 		} else {
-			sprintf(s, " + 0x%08x", mem->read32(get_seg_adr(CS, ++tip)));
+			sprintf(disp, " + 0x%08x", mem->read32(get_seg_adr(CS, ++tip)));
 		}
 	} else {
-		s[0] = '\0';
+		disp[0] = '\0';
 	}
-	printf("%s%s]%s", str[addrsize][rm], s, isDest?"\n\n":", ");
+	printf("%s%s]%s", addressing_str[addrsize][rm], disp, isDest?"\n\n":", ");
 
 	if (isReg && !isDest) {
 		reg = modrm >> 3 & 7;
@@ -321,7 +324,7 @@ u16 CPU::modrm16_ea(u8 modrm)
 
 u32 CPU::modrm32_ea(u8 modrm)
 {
-	u8 sib, idx;
+	u8 sib, idx, base;
 	u16 mod;
 	u32 tmp32;
 	u32 sib_scale[] = {0, 2, 4, 8};
@@ -344,10 +347,10 @@ u32 CPU::modrm32_ea(u8 modrm)
 	case 4: // <SIB>
 		sib = mem->read8(get_seg_adr(CS, eip++));
 		idx = sib >> 3 & 7;
+		base = sib & 7;
+		tmp32 = (base == 5 && mod == 0)? 0 : genregd(base);
 		if (idx != 4) {
-			tmp32 = genregd(sib & 7) + genregd(idx) * sib_scale[sib >> 6];
-		} else {
-			tmp32 = genregd(sib & 7);
+			tmp32 += genregd(idx) * sib_scale[sib >> 6];
 		}
 		break;
 	case 5:
@@ -456,7 +459,7 @@ void CPU::update_segreg(const u8 seg, const u16 n) {
 
 	dst = mem->read16(tmpadr) + ((mem->read8(tmpadr + 6) & 0xf) << 16);
 	if (sdcr[seg].attr & 0x800) {
-		dst = dst << 12;
+		dst = dst << 12 | 0xfff;
 	}
 	DAS_pr("\tlimit=0x%08x\n", dst);
 	sdcr[seg].limit = dst;
@@ -1544,6 +1547,10 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 					DAS_pr("RealMode -> ProtectedMode\n");
 				} else if (!isRealMode && !(cr[0] & 1)) {
 					isRealMode = true;
+					// xxx リアルモードでeipを使うので
+					// 上位ビットをクリアしておく
+					// 実際はどうなるのだろう
+					eip &= 0x0000ffff;
 					DAS_pr("ProtectedMode -> RealMode\n");
 				}
 			}
@@ -2809,15 +2816,17 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 
 /******************** RET ********************/
 
+	// xxx プロテクトモードでcall/retに対して
+	// オペレーションサイズプリフィックスが使われることはないよね？
 	case 0xc3: // RET  nearリターンする
 		DAS_prt_post_op(0);
 		DAS_pr("RET\n\n");
-		POPW(eip);
+		POPW(ip);
 		break;
 	case 0xcb: // RET  farリターンする
 		DAS_prt_post_op(0);
 		DAS_pr("RET\n\n");
-		POPW(eip);
+		POPW(ip);
 		POPW(dst);
 		update_segreg(CS, (u16)dst);
 		break;
@@ -2826,14 +2835,14 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		// eipは後で書き換わるのであらかじめ取得しておく
 		src = mem->read16(get_seg_adr(CS, eip));
 		DAS_pr("RET 0x%04x\n\n", src);
-		POPW(eip);
+		POPW(ip);
 		sp += src;
 		break;
 	case 0xca: // RET  farリターンする
 		DAS_prt_post_op(1);
 		src = mem->read16(get_seg_adr(CS, eip));
 		DAS_pr("RET 0x%04x\n\n", src);
-		POPW(eip);
+		POPW(ip);
 		POPW(dst);
 		update_segreg(CS, (u16)dst);
 		sp += src;
@@ -2869,7 +2878,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		DAS_pr("INT 3\n\n");
 		PUSHW0(flagu8 << 8 | flag8);
 		PUSHW0(segreg[CS]);
-		PUSHW0(eip);
+		PUSHW0(ip);
 		flagu8 &= ~(TFSET8 | IFSET8);
 		tmpadr = 3 * 4;
 		eip = mem->read16(tmpadr);
@@ -2882,7 +2891,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		eip++;
 		PUSHW0(flagu8 << 8 | flag8);
 		PUSHW0(segreg[CS]);
-		PUSHW0(eip);
+		PUSHW0(ip);
 		flagu8 &= ~(TFSET8 | IFSET8);
 		tmpadr = tmpb * 4;
 		eip = mem->read16(tmpadr);
@@ -2893,13 +2902,13 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		DAS_pr("INTO\n\n");
 		PUSHW0(flagu8 << 8 | flag8);
 		PUSHW0(segreg[CS]);
-		PUSHW0(eip);
+		PUSHW0(ip);
 		flagu8 &= ~(TFSET8 | IFSET8);
 		eip = mem->read16(0x10);
 		update_segreg(CS, mem->read16(0x12));
 		break;
 	case 0xcf: // IRET
-		POPW0(eip);
+		POPW0(ip);
 		POPW0(warg1);
 		update_segreg(CS, warg1);
 		POPW0(warg1);
@@ -3050,7 +3059,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		warg1 = mem->read16(get_seg_adr(CS, eip));
 		eip += 2;
 		DAS_pr("CALL 0x%04x\n\n", warg1);
-		PUSHW0(eip);
+		PUSHW0(ip);
 		eip += (s16)warg1;
 		break;
 /*
@@ -3065,7 +3074,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		eip += 4;
 		DAS_pr("CALL %04x:%04x\n\n", warg2, warg1);
 		PUSHW0(segreg[CS]);
-		PUSHW0(eip);
+		PUSHW0(ip);
 		update_segreg(CS, warg2);
 		eip = warg1;
 		break;
@@ -3478,11 +3487,11 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 			break;
 		case 2: // CALL r/m16 (CALL r/m32) 絶対間接nearコール
 			if ((modrm & 0xc0) == 0xc0) {
-				PUSHW0(eip);
+				PUSHW0(ip);
 				eip = genregw(modrm & 7);
 			} else {
 				tmpadr = modrm_seg_ea(modrm);
-				PUSHW0(eip);
+				PUSHW0(ip);
 				eip = mem->read16(tmpadr);
 			}
 			break;
@@ -3494,7 +3503,7 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 				warg1 = mem->read16(tmpadr);
 				warg2 = mem->read16(tmpadr + 2);
 				PUSHW0(segreg[CS]);
-				PUSHW0(eip);
+				PUSHW0(ip);
 				update_segreg(CS, warg2);
 				eip = warg1;
 			}
