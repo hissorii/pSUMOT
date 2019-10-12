@@ -297,7 +297,7 @@ private:
 
 	BUS *mem, *io;
 
-	u32 get_seg_adr(const SEGREG seg, const u16 a);
+	u32 get_seg_adr(const SEGREG seg, const u32 a);
 	void update_segreg(const u8 seg, const u16 n);
 
 #ifdef CORE_DAS

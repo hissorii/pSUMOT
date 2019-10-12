@@ -1,7 +1,7 @@
 TARGET = psumot
 
 # for debugging
-CXXFLAGS += -Wall
+CXXFLAGS += -Wall -g
 
 # for core debugging
 CXXFLAGS += -DCORE_DAS

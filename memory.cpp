@@ -4,7 +4,9 @@
 
 Memory::Memory(u32 size) {
 	ram = (u8 *)malloc((size_t)size);
+	ram_size = size;
 	sysrom = (u8 *)malloc((size_t)SYSROM_SIZE);
+	vram = (u8 *)malloc((size_t)VRAM_SIZE);
 	mem = this;
 	
 	// システムROMの読み込み
@@ -39,6 +41,8 @@ u8 Memory::read8(u32 addr) {
 	  FFFFFFFFH+-------------+-	   
 
 	 */
+
+	// BOOT ROM
 	if (addr >= 0xf8000 && addr <= 0xfffff) {
 		if (!(io->read8(0x480) & 2)) {
 			// ブートROM領域内の値を返す
@@ -46,15 +50,53 @@ u8 Memory::read8(u32 addr) {
 		}
 		return *(ram + addr);		
 	}
+
+	// RAM
+	if (addr < ram_size) {
+		return *(ram + addr);
+	}
+
+	// VRAM
+	if (addr >= 0x80000000 && addr < 0x80080000) {
+		return *(ram + (addr - 0x80000000));
+	}
+	if (addr >= 0x80100000 && addr < 0x80180000) {
+		return *(ram + (addr - 0x80100000));
+	}
+
+	// SYSTEM ROM(BOOT ROM)
 	if (addr >= 0xfffc0000) {
 		// システムROM領域内の値を返す
 		return *(sysrom + (addr - 0xfffc0000));
 	}
-	return *(ram + addr);
+
+	printf("not cocded yet. read addr=0x%x\n\n", addr);
+	exit(1);
 }
 
 void Memory::write8(u32 addr, u8 data) {
-	*(ram + addr) = data;
+	if (addr >= 0xc0000 && addr < 0xf0000) printf("w addr=0x%x(0x%x)\n", addr, data);
+
+	// RAM
+	if (addr < ram_size) {
+		*(ram + addr) = data;
+		return;
+	}
+
+	// VRAM
+	if (addr >= 0x80000000 && addr < 0x80080000) {
+		printf("w vram addr=0x%x(0x%x)\n", addr, data);
+		*(vram + (addr - 0x80000000)) = data;
+		return;
+	}
+	if (addr >= 0x80100000 && addr < 0x80180000) {
+		printf("w vram addr=0x%x(0x%x)\n", addr, data);
+		*(vram + (addr - 0x80100000)) = data;
+		return;
+	}
+
+	printf("not cocded yet. write addr=0x%x\n\n", addr);
+	exit(1);
 }
 
 u16 Memory::read16(u32 addr) {
@@ -62,8 +104,8 @@ u16 Memory::read16(u32 addr) {
 }
 
 void Memory::write16(u32 addr, u16 data) {
-	*(ram + addr) = data & 0xff;
-	*(ram + addr + 1) = data >> 8;
+	write8(addr, (u8)data);
+	write8(addr + 1, data >> 8);
 }
 
 u32 Memory::read32(u32 addr) {
@@ -71,8 +113,8 @@ u32 Memory::read32(u32 addr) {
 }
 
 void Memory::write32(u32 addr, u32 data) {
-	*(ram + addr) = data & 0xff;
-	*(ram + addr + 1) = data >> 8;
-	*(ram + addr + 2) = data >> 16;
-	*(ram + addr + 3) = data >> 24;
+	write8(addr, (u8)data);
+	write8(addr + 1, data >> 8);
+	write8(addr + 2, data >> 16);
+	write8(addr + 3, data >> 24);
 }

@@ -61,6 +61,7 @@ void CPU::reset() {
 	 */
 	sdcr[CS].base = 0xffff0000;
 	flag8 = 0;
+	cr[0] = 0x60000010;
 
 #ifdef CORE_DAS
 	DAS_hlt = false;
@@ -429,7 +430,7 @@ u8 CPU::modrmb(u8 modrm)
 // - 引数aにセグメントを加算したアドレスを返却する
 // - 386では、セグメント加算は、プロテクトモードでもリアルモードでも、
 //   セグメントディスクリプターキャッシュ内のbase addressに対して行う
-u32 CPU::get_seg_adr(const SEGREG seg, const u16 a) {
+u32 CPU::get_seg_adr(const SEGREG seg, const u32 a) {
 	return sdcr[seg].base + a;
 }
 
@@ -1507,6 +1508,27 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		DEC_R16(di);
 		break;
 
+#define JCCWD(STR, COND)					\
+	if (opsize == size16) {					\
+		DAS_prt_post_op(3);				\
+		dst = mem->read16(get_seg_adr(CS, ++eip));	\
+		DAS_pr(#STR" 0x%04x\n\n", dst);			\
+		if (COND) {			   		\
+			eip += (s16)(dst + 2);			\
+		} else {					\
+			eip += 2;				\
+		}						\
+	} else {						\
+		DAS_prt_post_op(5);				\
+		dst = mem->read32(get_seg_adr(CS, ++eip));	\
+		DAS_pr(#STR" 0x%08x\n\n", dst);			\
+		if (COND) {			   		\
+			eip += (s16)(dst + 4);			\
+		} else {					\
+			eip += 4;				\
+		}						\
+	}
+
 	case 0x0f:
 		subop = mem->read8(get_seg_adr(CS, eip));
 		switch (subop) {
@@ -1556,15 +1578,56 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 			}
 			eip++;
 			break;
-		case 0x84: // JE rel16 (JE rel32)
-			DAS_prt_post_op(3);
-			dst = mem->read16(get_seg_adr(CS, ++eip));
-			DAS_pr("JE/JZ 0x%04x\n\n", dst);
-			eip += 2;
-			if (flag8 & ZF) {
-				eip += (s16)dst;
-			}
+
+		case 0x80: // JO rel16 (JO rel32)
+			JCCWD(JO, flagu8 & OFSET8);
 			break;
+		case 0x81: // JNO rel16 (JNO rel32)
+			JCCWD(JNO, !(flagu8 & OFSET8));
+			break;
+		case 0x82: // JB/JC/JNAE rel16 (JC/JNAE rel32)
+			JCCWD(JB/JC/JNAE, flag8 & CF);
+			break;
+		case 0x83: // JNB/JNC/JAE rel16 (JNB/JNC rel32)
+			JCCWD(JNB/JNC/JAE, !(flag8 & CF));
+			break;
+		case 0x84: // JE/JZ rel16 (JE/JZ rel32)
+			JCCWD(JE/JZ, flag8 & ZF);
+			break;
+		case 0x85: // JNE/JNZ rel16 (JNE/JNZ rel32)
+			JCCWD(JNE/JNZ, !(flag8 & ZF));
+			break;
+		case 0x86: // JBE/JNA rel16 (JBE/JNA rel32)
+			JCCWD(JBE/JNA, flag8 & CF || flag8 & ZF);
+			break;
+		case 0x87: // JNBE/JA rel16 (JNBE/JA rel32)
+			JCCWD(JNBE/JA, !(flag8 & CF) && !(flag8 & ZF));
+			break;
+		case 0x88: // JS rel16 (JS rel32)
+			JCCWD(JS, flag8 & SF);
+			break;
+		case 0x89: // JNS rel16 (JNS rel32)
+			JCCWD(JNS, !(flag8 & SF));
+			break;
+		case 0x8a: // JP/JPE rel16 (JP/JPE rel32)
+			JCCWD(JP/JPE, flag8 & PF);
+			break;
+		case 0x8b: // JNP/JPO rel16 (JP/JPE rel32)
+			JCCWD(JNP/JPO, !(flag8 & PF));
+			break;
+		case 0x8c: // JL/JNGE rel16 (JL/JNGE rel32)
+			JCCWD(JL/JNGE, (flag8 ^ flagu8 << 4) & 0x80);
+			break;
+		case 0x8d: // JGE/JNL rel16 (JGE/JNL rel32)
+			JCCWD(JGE/JNL, !((flag8 ^ flagu8 << 4) & 0x80));
+			break;
+		case 0x8e: // JLE/JNG rel8
+			JCCWD(JLE/JNG, flag8 & ZF || (flag8 ^ flagu8 << 4) & 0x80);
+			break;
+		case 0x8f: // JNLE/JG rel8
+			JCCWD(JNLE/JG, !(flag8 & ZF) && !((flag8 ^ flagu8 << 4) & 0x80));
+		break;
+
 		case 0xa0: // PUSH FS
 			PUSH_SEG2(FS); // 2バイト命令用マクロ
 			break;
@@ -1594,13 +1657,14 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 
 /******************** Jcc ********************/
 
-#define JCC(STR, COND)							\
-	DAS_prt_post_op(1);						\
-	DAS_pr(#STR" 0x%02x\n\n", mem->read8(get_seg_adr(CS, eip)));	\
-	if (COND) {						   	\
-		eip += (s8)mem->read8(get_seg_adr(CS, eip)) + 1;		\
-	} else {							\
-		eip++;							\
+#define JCC(STR, COND)				\
+	DAS_prt_post_op(1);			\
+	dst = mem->read8(get_seg_adr(CS, eip));	\
+	DAS_pr(#STR" 0x%02x\n\n", dst);		\
+	if (COND) {			   	\
+		eip += (s8)dst + 1;		\
+	} else {				\
+		eip++;				\
 	}
 
 	case 0x70: // JO rel8
@@ -1649,7 +1713,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		JCC(JLE/JNG, flag8 & ZF || (flag8 ^ flagu8 << 4) & 0x80);
 		break;
 	case 0x7f: // JNLE/JG rel8
-		JCC(JNLE/JG, !(flag8 & ZF) && (flag8 ^ flagu8 << 4) & 0x80);
+		JCC(JNLE/JG, !(flag8 & ZF) && !((flag8 ^ flagu8 << 4) & 0x80));
 		break;
 
 	case 0xe3:
@@ -2335,13 +2399,25 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		break;
 	case 0xab:
 		DAS_prt_post_op(0);
-		DAS_pr("STOSW\n\n");
-	        (repe_prefix)? cnt = cx, cx = 0 : cnt = 1;
-		incdec = (flagu8 & DF8)? -2 : +2;
-		while (cnt != 0) {
-			mem->write16(get_seg_adr(ES, di), ax);
-			di += incdec;
-			cnt--;
+		if (opsize == size16) {
+			DAS_pr("STOSW\n\n");
+			(repe_prefix)? cnt = cx, cx = 0 : cnt = 1;
+			incdec = (flagu8 & DF8)? -2 : +2;
+			while (cnt != 0) {
+				mem->write16(get_seg_adr(ES, di), ax);
+				di += incdec;
+				cnt--;
+			}
+		} else {
+			DAS_pr("STOSD\n\n");
+			(repe_prefix)? cnt = ecx, ecx = 0 : cnt = 1;
+			incdec = (flagu8 & DF8)? -4 : +4;
+			while (cnt != 0) {
+				mem->write32(get_seg_adr(ES, edi), eax);
+				edi += incdec;
+				cnt--;
+			}
+
 		}
 		break;
 
@@ -2362,7 +2438,10 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		DAS_pr("LODSW\n\n");
 	        (repe_prefix)? cnt = cx, cx = 0 : cnt = 1;
 		while (cnt != 0) {
-			ax = mem->read16(get_seg_adr(DS, si));
+			// xxx プロテクトモードでオペレーションサイズ
+			// オーバーライドした時だけ上位16bitも参照する?
+			// それともリアルモードでも参照する?
+			ax = mem->read16(get_seg_adr(DS, esi));
 			si +=2;
 			cnt--;
 		}
