@@ -79,6 +79,9 @@ void CPU::DAS_dump_reg() {
 	int i;
 	static int step = 1;
 
+	// NP21はSTOSDの結果を3stepに分けるので、その対応
+	if (step == 50137) step = 50139;
+
 	for (i = 0; i < 4; i++) {
 		printf("%s:%08x ", genreg_name[2][i], genregd(i));
 	}
@@ -96,7 +99,7 @@ void CPU::DAS_dump_reg() {
 	printf("         cr0:%08x", cr[0]);
 	printf("\n\n");
 
-#if 0
+#if 1
 	int j, startadr;
 	if (step == 120) {
                 for (i = 0; i < 32; i++) {
@@ -105,7 +108,7 @@ void CPU::DAS_dump_reg() {
                 }
                 printf("\n");
         }
-	if (step == 45543) {
+	if (step == 50140) {
 		startadr = 0xf7f00;
 		for (i = 0; i < 16; i++) {
 			printf("%04x ", i * 16 + startadr);
@@ -447,7 +450,7 @@ void CPU::update_segreg(const u8 seg, const u16 n) {
 	// プロテクトモード
 	u32 tmpadr, dst;
 
-	// セグメントで指定されるディスクリプタの戦先頭アドレス
+	// セグメントで指定されるディスクリプタの先頭アドレス
 	tmpadr = gdtr.base + (n & 0xf8);
 	dst = (mem->read32(tmpadr + 2) & 0x00ffffff)
 		+ (mem->read8(tmpadr + 7) << 24);
@@ -703,6 +706,15 @@ OF/SF/ZF/AF/PF/CF:結果による
 OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
  */
 
+#define FLAG_LOGOPb(d)		\
+	flag8 = flag_calb[d];	\
+	flagu8 &= ~OFSET8;
+#define FLAG_LOGOPw(d)		\
+	flag8 = flag_calw[d];	\
+	flagu8 &= ~OFSET8;
+#define FLAG_LOGOPd(d)		\
+	/* xxx */;
+
 // LOGical OPeration (OP r, r/m)
 #define LOGOP_R_RM(OP, STR, BWD)			\
 	modrm = mem->read8(get_seg_adr(CS, eip));	\
@@ -714,8 +726,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	dst = genreg##BWD(greg);			\
 	dst OP##= modrm##BWD(modrm);			\
 	genreg##BWD(greg) = dst;			\
-	flag8 = flag_cal##BWD[dst];			\
-	flagu8 &= ~OFSET8;
+	FLAG_LOGOP##BWD(dst)
 
 // LOGical OPeration (OP r/m, r)
 #define LOGOP_RM_R(OP, STR, BWD)			\
@@ -736,35 +747,40 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		dst OP##= src;				\
 		mem->write##BWD(tmpadr, (BWD##CAST)dst);\
 	}						\
-	flag8 = flag_cal##BWD[dst];			\
-	flagu8 &= ~OFSET8;
+	FLAG_LOGOP##BWD(dst)
 
 	case 0x08: // OR r/m8, r8
 		LOGOP_RM_R(|, OR, b);
 		break;
-	case 0x09: // OR r/m16, r16
-		LOGOP_RM_R(|, OR, w);
+	case 0x09: // OR r/m16, r16 (OR r/m32, r32)
+		if (opsize == size16) {
+			LOGOP_RM_R(|, OR, w);
+		} else {
+			LOGOP_RM_R(|, OR, d);
+		}
 		break;
 	case 0x0a: // OR r8, r/m8
 		LOGOP_R_RM(|, OR, b);
 		break;
 	case 0x0b: // OR r16, r/m16 (OR r32, r/m32)
-		LOGOP_R_RM(|, OR, w);
+		if (opsize == size16) {
+			LOGOP_R_RM(|, OR, w);
+		} else {
+			LOGOP_R_RM(|, OR, d);
+		}
 		break;
 	case 0x0c: // OR AL, imm8
 		DAS_prt_post_op(1);
 		DAS_pr("OR AL, 0x%02x\n\n", mem->read8(get_seg_adr(CS, eip)));
 		al |= mem->read8(get_seg_adr(CS, eip));
-		flag8 = flag_calb[al];
-		flagu8 &= ~OFSET8;
+		FLAG_LOGOPb(al);
 		eip++;
 		break;
 	case 0x0d: // OR AX, imm16 (OR EAX, imm32)
 		DAS_prt_post_op(2);
 		DAS_pr("OR AX, 0x%04x\n\n", mem->read16(get_seg_adr(CS, eip)));
 		ax |= mem->read16(get_seg_adr(CS, eip));
-		flag8 = flag_calw[ax];
-		flagu8 &= ~OFSET8;
+		FLAG_LOGOPw(ax);
 		eip += 2;
 		break;
 
@@ -775,16 +791,16 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	mem->write16((segreg[SS] << 4) + sp, (u16)(d));
 
 #define PUSHD0(d)				\
-	sp -= 4;				\
-	mem->write32((segreg[SS] << 4) + sp, d);
+	esp -= 4;				\
+	mem->write32((segreg[SS] << 4) + esp, d);
 
 #define PUSHW(d)				\
 	sp -= 2;				\
 	mem->write16(get_seg_adr(SS, sp), d);
 
 #define PUSHD(d)				\
-	sp -= 4;				\
-	mem->write32(get_seg_adr(SS, sp), d);
+	esp -= 4;				\
+	mem->write32(get_seg_adr(SS, esp), d);
 
 #define PUSHW_GENREG(reg)		\
 	DAS_prt_post_op(0);		\
@@ -940,7 +956,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	sp += 2;
 
 #define POPD0(d)				\
-	d = mem->read32((segreg[SS] << 4) + sp);\
+	d = mem->read32((segreg[SS] << 4) + esp);\
 	sp += 4;
 
 #define POPW(d)					\
@@ -948,7 +964,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	sp += 2;
 
 #define POPD(d)					\
-	d = mem->read32(get_seg_adr(SS, sp));	\
+	d = mem->read32(get_seg_adr(SS, esp));	\
 	sp += 4;
 
 #define POPW_GENREG(reg)		\
@@ -1115,14 +1131,22 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 	case 0x20: // AND r/m8, r8
 		LOGOP_RM_R(&, AND, b);
 		break;
-	case 0x21: // AND r/m16, r16
-		LOGOP_RM_R(&, AND, b);
+	case 0x21: // AND r/m16, r16 (AND r/m32, r32)
+		if (opsize == size16) {
+			LOGOP_RM_R(&, AND, w);
+		} else {
+			LOGOP_RM_R(&, AND, d);
+		}
 		break;
 	case 0x22: // AND r8, r/m8
 		LOGOP_R_RM(&, AND, b);
 		break;
 	case 0x23: // AND r16, r/m16 (AND r32, r/m32)
-		LOGOP_R_RM(&, AND, w);
+		if (opsize == size16) {
+			LOGOP_R_RM(&, AND, w);
+		} else {
+			LOGOP_R_RM(&, AND, d);
+		}
 		break;
 /*
 +--------+--------+-------------+
@@ -1327,13 +1351,21 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 		LOGOP_RM_R(^, XOR, b);
 		break;
 	case 0x31: // XOR r/m16, r16 (XOR r/m32, r32)
-		LOGOP_RM_R(^, XOR, w);
+		if (opsize == size16) {
+			LOGOP_RM_R(^, XOR, w);
+		} else {
+			LOGOP_RM_R(^, XOR, d);
+		}
 		break;
 	case 0x32: // XOR r8, r/m8
 		LOGOP_R_RM(^, XOR, b);
 		break;
 	case 0x33: // XOR r16, r/m16 (xxx XOR r32, r/m32)
-		LOGOP_R_RM(^, XOR, w);
+		if (opsize == size16) {
+			LOGOP_R_RM(^, XOR, w);
+		} else {
+			LOGOP_R_RM(^, XOR, d);
+		}
 		break;
 	case 0x34: // XOR AL, imm8
 		DAS_prt_post_op(1);
@@ -1443,29 +1475,69 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	flag8 |= (dst ^ reg) & AF;				\
 	(dst ^ reg) & 0x8000?flagu8 |= OFSET8:flagu8 &= ~OFSET8
 
+#define INC_R32(reg)						\
+	DAS_prt_post_op(0);					\
+	DAS_pr("INC %s\n\n", #reg);				\
+	dst = reg;						\
+	reg++;							\
+	flag8 &= CF; /* CF以外はリセット*/			\
+	/* xxx flag */
+
 	case 0x40: // INC AX (INC EAX)
-		INC_R16(ax);
+		if (opsize == size16) {
+			INC_R16(ax);
+		} else {
+			INC_R32(eax);
+		}
 		break;
 	case 0x41: // INC CX (INC ECX)
-		INC_R16(cx);
+		if (opsize == size16) {
+			INC_R16(cx);
+		} else {
+			INC_R32(ecx);
+		}
 		break;
 	case 0x42: // INC DX (INC EDX)
-		INC_R16(dx);
+		if (opsize == size16) {
+			INC_R16(dx);
+		} else {
+			INC_R32(edx);
+		}
 		break;
 	case 0x43: // INC BX (INC EBX)
-		INC_R16(bx);
+		if (opsize == size16) {
+			INC_R16(bx);
+		} else {
+			INC_R32(ebx);
+		}
 		break;
 	case 0x44: // INC SP (INC ESP)
-		INC_R16(sp);
+		if (opsize == size16) {
+			INC_R16(sp);
+		} else {
+			INC_R32(esp);
+		}
 		break;
 	case 0x45: // INC BP (INC EBP)
-		INC_R16(bp);
+		if (opsize == size16) {
+			INC_R16(bp);
+		} else {
+			INC_R32(ebp);
+		}
 		break;
 	case 0x46: // INC SI (INC ESI)
-		INC_R16(si);
+		if (opsize == size16) {
+			INC_R16(si);
+		} else {
+			INC_R32(esi);
+		}
 		break;
 	case 0x47: // INC DI (INC EDI)
-		INC_R16(di);
+		if (opsize == size16) {
+			INC_R16(di);
+		} else {
+			INC_R32(edi);
+		}
 		break;
 
 /******************** DEC ********************/
@@ -1483,29 +1555,69 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	flag8 |= (dst ^ reg) & AF;				\
 	(dst ^ reg) & 0x8000?flagu8 |= OFSET8:flagu8 &= ~OFSET8
 
+#define DEC_R32(reg)						\
+	DAS_prt_post_op(0);					\
+	DAS_pr("DEC %s\n\n", #reg);				\
+	dst = reg;						\
+	reg--;							\
+	flag8 &= CF; /* CF以外はリセット*/			\
+	/* xxx flag */
+
 	case 0x48: // DEC AX (DEC EAX)
-		DEC_R16(ax);
+		if (opsize  == size16) {
+			DEC_R16(ax);
+		} else {
+			DEC_R32(eax);
+		}
 		break;
 	case 0x49: // DEC CX (DEC ECX)
-		DEC_R16(cx);
+		if (opsize  == size16) {
+			DEC_R16(cx);
+		} else {
+			DEC_R32(ecx);
+		}
 		break;
 	case 0x4a: // DEC DX (DEC EDX)
-		DEC_R16(dx);
+		if (opsize  == size16) {
+			DEC_R16(dx);
+		} else {
+			DEC_R32(edx);
+		}
 		break;
 	case 0x4b: // DEC BX (DEC EBX)
-		DEC_R16(bx);
+		if (opsize  == size16) {
+			DEC_R16(bx);
+		} else {
+			DEC_R32(ebx);
+		}
 		break;
 	case 0x4c: // DEC SP (DEC ESP)
-		DEC_R16(sp);
+		if (opsize  == size16) {
+			DEC_R16(sp);
+		} else {
+			DEC_R32(esp);
+		}
 		break;
 	case 0x4d: // DEC BP (DEC EBP)
-		DEC_R16(bp);
+		if (opsize  == size16) {
+			DEC_R16(bp);
+		} else {
+			DEC_R32(ebp);
+		}
 		break;
 	case 0x4e: // DEC SI (DEC ESI)
-		DEC_R16(si);
+		if (opsize  == size16) {
+			DEC_R16(si);
+		} else {
+			DEC_R32(esi);
+		}
 		break;
 	case 0x4f: // DEC DI (DEC EDI)
-		DEC_R16(di);
+		if (opsize  == size16) {
+			DEC_R16(di);
+		} else {
+			DEC_R32(edi);
+		}
 		break;
 
 #define JCCWD(STR, COND)					\
@@ -1746,15 +1858,6 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	flag8 = flag_cal##BWD[res ANDN];			\
 	flag8 |= (dst ^ src ^ res) & AF;
 
-#define FLAG_LOGOP_RM_IMb()	\
-	flag8 = flag_calb[dst];	\
-	flagu8 &= ~OFSET8;
-#define FLAG_LOGOP_RM_IMw()	\
-	flag8 = flag_calw[dst];	\
-	flagu8 &= ~OFSET8;
-#define FLAG_LOGOP_RM_IMd()	\
-	/* xxx */;
-
 #define LOGOP_RM_IM(BWD, BWD2, OP, IPINC)			\
 	eip++;							\
 	if ((modrm & 0xc0) == 0xc0) {				\
@@ -1770,7 +1873,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		mem->write##BWD(tmpadr, dst);			\
 	}							\
 	eip += IPINC;						\
-	FLAG_LOGOP_RM_IM##BWD()
+	FLAG_LOGOP##BWD(dst)
 
 #define CMP_RM_IM(BWD, BWD2, IPINC, ANDN, ANDN2)		\
 	eip++;							\

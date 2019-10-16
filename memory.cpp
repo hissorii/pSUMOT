@@ -1,12 +1,15 @@
 #include <cstdlib> // for malloc(), size_t, exit()
+#include <cstring> // for memset()
 #include <fstream>
 #include "memory.h"
 
 Memory::Memory(u32 size) {
 	ram = (u8 *)malloc((size_t)size);
+	memset(ram, 0, size);
 	ram_size = size;
 	sysrom = (u8 *)malloc((size_t)SYSROM_SIZE);
 	vram = (u8 *)malloc((size_t)VRAM_SIZE);
+	memset(vram, 0, VRAM_SIZE);
 	mem = this;
 	
 	// システムROMの読み込み
@@ -58,10 +61,10 @@ u8 Memory::read8(u32 addr) {
 
 	// VRAM
 	if (addr >= 0x80000000 && addr < 0x80080000) {
-		return *(ram + (addr - 0x80000000));
+		return *(vram + (addr - 0x80000000));
 	}
 	if (addr >= 0x80100000 && addr < 0x80180000) {
-		return *(ram + (addr - 0x80100000));
+		return *(vram + (addr - 0x80100000));
 	}
 
 	// SYSTEM ROM(BOOT ROM)
@@ -75,10 +78,12 @@ u8 Memory::read8(u32 addr) {
 }
 
 void Memory::write8(u32 addr, u8 data) {
-	if (addr >= 0xc0000 && addr < 0xf0000) printf("w addr=0x%x(0x%x)\n", addr, data);
 
 	// RAM
 	if (addr < ram_size) {
+		if (addr >= 0xc0000 && addr < 0xf0000) {
+			printf("w vram addr=0x%x(0x%x)\n", addr, data);
+		}
 		*(ram + addr) = data;
 		return;
 	}
