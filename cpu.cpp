@@ -116,8 +116,8 @@ void CPU::DAS_dump_reg() {
                 }
                 printf("\n");
         }
-	if (step == 50140) {
-		startadr = 0xf7f00;
+	if (step == 50634) {
+		startadr = 0xf7fc0;
 		for (i = 0; i < 16; i++) {
 			printf("%04x ", i * 16 + startadr);
 			for (j = 0; j < 16; j++) {
@@ -583,22 +583,44 @@ void CPU::exec() {
 	flag8 = flag_calw[r ANDN];	\
 	flag8 |= (d ^ s ^ r) & AF;
 
-#define FLAG8d(r, s, d, ANDN, CRY)					\
-	flag8 = pflag_cal[r & 0xff];					\
-	flag8 |= (r == 0)? ZF : 0;					\
-	flag8 |= (r & 0x80000000)? SF : 0;				\
-	flag8 |= (((d >> 1) + (s >> 1) + (d & s & 1)) & 0x80000000)? CF : 0; \
-	flag8 |= (d ^ s ^ r) & AF;
+#define FLAG8bADD FLAG8b
+#define FLAG8bADC FLAG8b
+#define FLAG8bSUB FLAG8b
+#define FLAG8bSBB FLAG8b
+#define FLAG8wADD FLAG8w
+#define FLAG8wADC FLAG8w
+#define FLAG8wSUB FLAG8w
+#define FLAG8wSBB FLAG8w
+
+#define FLAG8dALL(r, s, d)			\
+	flag8 = pflag_cal[r & 0xff];		\
+	flag8 |= (r == 0)? ZF : 0;		\
+	flag8 |= (r & 0x80000000)? SF : 0;	\
+	flag8 |= (d ^ s ^ r) & AF
+
+#define FLAG8dADD(r, s, d, ANDN, CRY)				\
+	FLAG8dALL(r, s, d);					\
+	/* CF */						\
+	flag8 |= ((d >> 1) + (s >> 1) + (d & s & 1)) >> 23;
 
 // CRYは-1(0xff), 0, 1のいずれか
-#define FLAG8dc(r, s, d, ANDN, CRY)					\
-	flag8 = pflag_cal[r & 0xff];					\
-	flag8 |= (r == 0)? ZF : 0;					\
-	flag8 |= (r & 0x80000000)? SF : 0;				\
-	flag8 |= (((d >> 1) + (s >> 1) + (((d & s) | (d & CRY) | (s & CRY)) & 1)) & 0x80000000)? CF : 0; \
-	flag8 |= (d ^ s ^ r) & AF;
+#define FLAG8dADC(r, s, d, ANDN, CRY)				\
+	FLAG8dALL(r, s, d);					\
+	/* CF */						\
+	flag8 |= ((d >> 1) + (s >> 1) + (((d & 1) | (s & 1) | (CRY & 1)) >> 1)) >> 23;
 
-#define CAL_RM_R(OP, STR, BWD, CRY, ANDN, C)		\
+#define FLAG8dSUB(r, s, d, ANDN, CRY)				\
+	FLAG8dALL(r, s, d);					\
+	/* CF */						\
+	flag8 |= ((r >> 1) + (s >> 1) + (r & s & 1)) >> 23;
+
+#define FLAG8dSBB(r, s, d, ANDN, CRY)				\
+	FLAG8dALL(r, s, d);					\
+	/* CF */						\
+	flag8 |= ((r >> 1) + (s >> 1) + (((r & 1) | (s & 1) | (CRY & 1)) >> 1)) >> 23;
+
+
+#define CAL_RM_R(OP, STR, BWD, CRY, ANDN)		\
 	modrm = mem->read8(get_seg_adr(CS, eip));	\
 	DAS_prt_post_op(nr_disp_modrm(modrm) + 1);	\
 	DAS_pr(#STR" ");				\
@@ -615,10 +637,10 @@ void CPU::exec() {
 		res = dst OP src + CRY;			\
 		mem->write##BWD(tmpadr, (BWD##CAST)res);\
 	}						\
-	FLAG8##BWD##C(res, src, dst, ANDN, CRY);	\
+	FLAG8##BWD##STR(res, src, dst, ANDN, CRY);	\
 	OF_##STR##BWD(res, src, dst);
 
-#define CAL_R_RM(OP, STR, BWD, CRY, ANDN, C)		\
+#define CAL_R_RM(OP, STR, BWD, CRY, ANDN)		\
 	modrm = mem->read8(get_seg_adr(CS, eip));	\
 	DAS_prt_post_op(nr_disp_modrm(modrm) + 1);	\
 	DAS_pr(#STR" ");				\
@@ -628,7 +650,7 @@ void CPU::exec() {
 	src = modrm##BWD(modrm);			\
 	res = dst OP src + CRY;				\
 	genreg##BWD(modrm >> 3 & 7) = (BWD##CAST)res;	\
-	FLAG8##BWD##C(res, src, dst, ANDN, CRY);	\
+	FLAG8##BWD##STR(res, src, dst, ANDN, CRY);	\
 	OF_##STR##BWD(res, src, dst);
 
 /******************** ADD ********************/
@@ -639,23 +661,23 @@ void CPU::exec() {
 OF/SF/ZF/AF/PF/CF:結果による
  */
 	case 0x00: // ADD r/m8, r8
-		CAL_RM_R(+, ADD, b, 0, , );
+		CAL_RM_R(+, ADD, b, 0, );
 		break;
 	case 0x01: // ADD r/m16, r16 (ADD r/m32, r32)
 		if (opsize == size16) {
-			CAL_RM_R(+, ADD, w, 0, , );
+			CAL_RM_R(+, ADD, w, 0, );
 		} else {
-			CAL_RM_R(+, ADD, d, 0, , );
+			CAL_RM_R(+, ADD, d, 0, );
 		}
 		break;
 	case 0x02: // ADD r8, r/m8
-		CAL_R_RM(+, ADD, b, 0, , );
+		CAL_R_RM(+, ADD, b, 0, );
 		break;
 	case 0x03: // ADD r16, r/m16 (ADD r32, r/m32)
 		if (opsize == size16) {
-			CAL_R_RM(+, ADD, w, 0, , );
+			CAL_R_RM(+, ADD, w, 0, );
 		} else {
-			CAL_R_RM(+, ADD, d, 0, , );
+			CAL_R_RM(+, ADD, d, 0, );
 		}
 		break;
 	case 0x04: // ADD AL, imm8
@@ -684,7 +706,7 @@ OF/SF/ZF/AF/PF/CF:結果による
 			DAS_pr("ADD EAX, 0x%08x\n\n", src);
 			eip += 4;
 			res = eax + src;
-			FLAG8d(res, src, eax, , );
+			FLAG8dADD(res, src, eax, , );
 			OF_ADDd(res, src, eax);
 			eax = res;
 		}
@@ -693,20 +715,20 @@ OF/SF/ZF/AF/PF/CF:結果による
 /******************** ADC ********************/
 
 	case 0x10: // ADC r/m8, r8
-		CAL_RM_R(+, ADC, b, (flag8 & CF), , );
+		CAL_RM_R(+, ADC, b, (flag8 & CF), );
 		break;
 	case 0x11: // ADC r/m16, r16 (ADC r/m32, r32)
 		if (opsize == size16) {
-			CAL_RM_R(+, ADC, w, (flag8 & CF), , );
+			CAL_RM_R(+, ADC, w, (flag8 & CF), );
 		} else {
-			CAL_RM_R(+, ADC, d, (flag8 & CF), , c);
+			CAL_RM_R(+, ADC, d, (flag8 & CF), );
 		}
 		break;
 	case 0x12: // ADC r8, r/m8
-		CAL_R_RM(+, ADC, b, (flag8 & CF), , );
+		CAL_R_RM(+, ADC, b, (flag8 & CF), );
 		break;
 	case 0x13: // ADC r16, r/m16 (ADC r32, r/m32)
-		CAL_R_RM(+, ADC, w, (flag8 & CF), , );
+		CAL_R_RM(+, ADC, w, (flag8 & CF), );
 		break;
 	case 0x14: // ADC AL, imm8
 		DAS_prt_post_op(1);
@@ -734,7 +756,7 @@ OF/SF/ZF/AF/PF/CF:結果による
 			DAS_pr("ADC EAX, 0x%08x\n\n", src);
 			eip += 4;
 			res = eax + src + (flag8 & CF);
-			FLAG8d(res, src, eax, , (flag8 & CF));
+			FLAG8dADC(res, src, eax, , (flag8 & CF));
 			OF_ADCd(res, src, eax);
 			eax = res;
 		}
@@ -1340,23 +1362,23 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 /******************** SBB ********************/
 
 	case 0x18: // SBB r/m8, r8
-		CAL_RM_R(-, SBB, b, -(flag8 & CF), & 0x1ff, );
+		CAL_RM_R(-, SBB, b, -(flag8 & CF), & 0x1ff);
 		break;
 	case 0x19: // SBB r/m16, r16 (SBB r/m32, r32)
 		if (opsize == size16) {
-			CAL_RM_R(-, SBB, w, -(flag8 & CF), & 0x1ffff, );
+			CAL_RM_R(-, SBB, w, -(flag8 & CF), & 0x1ffff);
 		} else {
-			CAL_RM_R(-, SBB, d, -(flag8 & CF), & 0x1ffff, c);
+			CAL_RM_R(-, SBB, d, -(flag8 & CF), & 0x1ffff);
 		}
 		break;
 	case 0x1a: // SBB r8, r/m8
-		CAL_R_RM(-, SBB, b, -(flag8 & CF), & 0x1ff, );
+		CAL_R_RM(-, SBB, b, -(flag8 & CF), & 0x1ff);
 		break;
 	case 0x1b: // SBB r16, r/m16 (SBB r32, r/m32)
 		if (opsize == size16) {
-			CAL_R_RM(-, SBB, w, -(flag8 & CF), & 0x1ffff, );
+			CAL_R_RM(-, SBB, w, -(flag8 & CF), & 0x1ffff);
 		} else {
-			CAL_R_RM(-, SBB, d, -(flag8 & CF), & 0x1ffff, c);
+			CAL_R_RM(-, SBB, d, -(flag8 & CF), & 0x1ffff);
 		}
 		break;
 	case 0x1c: // SBB AL, imm8
@@ -1389,7 +1411,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 			res = dst - src - (flag8 & CF);
 			eax = res;
 			eip += 4;
-			FLAG8d(res, src, dst, & 0x1ffff, (flag8 & CF));
+			FLAG8dSBB(res, src, dst, & 0x1ffff, (flag8 & CF));
 			OF_SBBd(res, src, dst);
 		}
 		break;
@@ -1397,23 +1419,23 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 /******************** SUB ********************/
 
 	case 0x28: // SUB r/m8, r8
-		CAL_RM_R(-, SUB, b, 0, & 0x1ff, );
+		CAL_RM_R(-, SUB, b, 0, & 0x1ff);
 		break;
 	case 0x29: // SUB r/m16, r16 (SUB r/m32, r32)
 		if (opsize == size16) {
-			CAL_RM_R(-, SUB, w, 0, & 0x1ffff, );
+			CAL_RM_R(-, SUB, w, 0, & 0x1ffff);
 		} else {
-			CAL_RM_R(-, SUB, d, 0, & 0x1ffff, );
+			CAL_RM_R(-, SUB, d, 0, & 0x1ffff);
 		}
 		break;
 	case 0x2a: // SUB r8, r/m8
-		CAL_R_RM(-, SUB, b, 0, & 0x1ff, );
+		CAL_R_RM(-, SUB, b, 0, & 0x1ff);
 		break;
 	case 0x2b: // SUB r16, r/m16 (SUB r32, r/m32)
 		if (opsize == size16) {
-			CAL_R_RM(-, SUB, w, 0, & 0x1ffff, );
+			CAL_R_RM(-, SUB, w, 0, & 0x1ffff);
 		} else {
-			CAL_R_RM(-, SUB, d, 0, & 0x1ffff, );
+			CAL_R_RM(-, SUB, d, 0, & 0x1ffff);
 		}
 		break;
 	case 0x2c: // SUB AL, imm8
@@ -1446,7 +1468,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 			res = dst - src;
 			eax = res;
 			eip += 4;
-			FLAG8d(res, src, dst, & 0x1ffff, );
+			FLAG8dSUB(res, src, dst, & 0x1ffff, );
 			OF_SUBd(res, src, dst);
 		}
 		break;
@@ -2776,7 +2798,9 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 				cnt--;
 			}
 			ecx = cnt;
-			/* xxx flag */
+			FLAG8dSUB(res, src, dst, , );
+			(dst ^ res) & (dst ^ src) & 0x80000000?
+				flagu8 |= OFSET8 : flagu8 &= ~OFSET8;
 		}
 		break;
 
@@ -2860,14 +2884,23 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 			} else {
 				if ((modrm & 0xc0) == 0xc0) {
 					dst = genregd(modrm & 0x07);
-					genregd(modrm & 0x07) = dst << src;
+					res = dst << src;
+					genregd(modrm & 0x07) = res;
 				} else {
 					tmpadr = modrm_seg_ea(modrm);
 					dst = mem->read32(tmpadr);
-					mem->write32(tmpadr, dst << src);
+					res = dst << src;
+					mem->write32(tmpadr, res);
 				}
 				eip++;
-				// xxx flag
+				flag8 = pflag_cal[res & 0xff];
+				flag8 |= (res == 0)? ZF : 0;
+				flag8 |= (res & 0x80000000)? SF : 0;
+				flag8 |= AF; // NP2/NP21に合わせる
+				// 元の値の31bitと30bitを比較する
+				(dst ^ dst >> 1) & 0x40000000?
+					flagu8 |= OFSET8 : flagu8 &= ~OFSET8;
+				// xxx CF flag
 			}
 			break;
 		// C1 /5 ib
