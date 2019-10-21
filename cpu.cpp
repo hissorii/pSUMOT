@@ -3165,56 +3165,87 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 
 #define ROT_L <<
 #define ROT_R >>
+// MSB
 #define ROT_ANDLb 0x80
-#define ROT_ANDRb 0x01
 #define ROT_ANDLw 0x8000
+// LSB
+#define ROT_ANDRb 0x01
 #define ROT_ANDRw 0x0001
-#define ROT_AND2b 0x40
-#define ROT_AND2w 0x4000
+// MSBをLSBに右シフト
+#define MSB2LSB_SFTb 7
+#define MSB2LSB_SFTw 15
+#define MSB2LSB_SFTd 31
+// dst or res
+#define DorR_L dst
+#define DorR_R res
 
-#define ROT_RM(BWD, DIR, SRC, DST, FUNC)			\
+#define ROT_RM(BWD, DIR, CNT, FUNC)					\
+	eip++;								\
+	if ((modrm & 0xc0) == 0xc0) {					\
+		dst = genreg##BWD(modrm & 0x07);			\
+		FUNC;							\
+		genreg##BWD(modrm & 0x07) = (BWD##CAST)res;		\
+	} else {							\
+		tmpadr = modrm_seg_ea(modrm);				\
+		dst = mem->read##BWD(tmpadr);				\
+		FUNC;							\
+		mem->write##BWD(tmpadr, (BWD##CAST)res);		\
+	}								\
+	if (CNT != 0) {							\
+		/* SF, ZF, AF, PFは影響を受けない*/			\
+		/* CF							\
+		   左回転: dst << (CNT - 1) & MSB			\
+		   右回転: dst >> (CNT - 1) & LSB */			\
+		dst ROT_##DIR (CNT - 1) & ROT_AND##DIR##BWD?		\
+			flag8 |= CF : flag8 &= ~CF;			\
+		/* OFは1シフトの時影響し、その他の場合は		\
+		   未定義だが常に計算する。0シフトは不変。		\
+		   左回転: CF ^ MSB(res) -> MSB(dst) ^ MSB-1(dst)	\
+		   右回転:                  MSB(res) ^ MSB-1(res) */	\
+		flagu8 |= ((DorR_##DIR ^ DorR_##DIR << 1) & ROT_ANDL##BWD) >> MSB2LSB_SFT##BWD << 3; \
+	}
+
+#define MSBb 0x80
+#define MSBw 0x8000
+#define MSBd 0x80000000
+
+#define FLAG8bSALSHL(r) flag8 = flag_calb[r & 0x1ff]
+#define FLAG8wSALSHL(r) flag8 = flag_calw[r & 0x1ffff]
+#define FLAG8dSALSHL(r)				\
+	flag8 = pflag_cal[r & 0xff];		\
+	flag8 |= (r == 0)? ZF : 0;		\
+	flag8 |= (r & 0x80000000)? SF : 0;	\
+	/* CF */				\
+	flag8 |= dst >> (CNT - 1) & 1;
+
+#define SFT_SALSHL(BWD, CNT)					\
 	eip++;							\
 	if ((modrm & 0xc0) == 0xc0) {				\
 		dst = genreg##BWD(modrm & 0x07);		\
-		FUNC;						\
+		res = dst << CNT;				\
 		genreg##BWD(modrm & 0x07) = (BWD##CAST)res;	\
 	} else {						\
 		tmpadr = modrm_seg_ea(modrm);			\
 		dst = mem->read##BWD(tmpadr);			\
-		FUNC;						\
-		mem->write##BWD(tmpadr, (BWD##CAST)res);	\
-	}							\
-	dst ROT_##DIR (SRC - 1) & ROT_AND##DIR##BWD?		\
-		flag8 |= CF : flag8 &= ~CF;			\
-	/* OFは1シフトの時影響し、その他の場合は		\
-	   未定義だが常に計算する。0シフトは不変。		\
-	   CF ^ MSB(DEST) or MSB(DEST) ^ MSB-1(DEST) */		\
-	(DST ^ DST >> 1) & ROT_AND2##BWD?			\
-		flagu8 |= OFSET8 : flagu8 &= ~OFSET8;
-
-#define SFT_ANDb 0x100
-#define SFT_ANDw 0x10000
-#define SFT_AND2b 0x80
-#define SFT_AND2w 0x8000
-#define SFT_SALSHL(BWD, CNT, ANDN)				\
-	eip++;							\
-	if ((modrm & 0xc0) == 0xc0) {				\
-		res = genreg##BWD(modrm & 0x07) << CNT;		\
-		genreg##BWD(modrm & 0x07) = (BWD##CAST)res;	\
-	} else {						\
-		tmpadr = modrm_seg_ea(modrm);			\
-		res = mem->read##BWD(tmpadr) << CNT;		\
+		res = dst << CNT;				\
 		mem->write##BWD(tmpadr, (BWD##CAST)res);	\
 	}							\
 	if (CNT != 0) {						\
-		flag8 = flag_cal##BWD[res ANDN];		\
+		FLAG8##BWD##SALSHL(res);			\
 		flag8 |= AF; /* NP2/NP21に合わせる */		\
 		/* OFは1シフトの時影響し、その他の場合は	\
 		   未定義だが常に計算する。0シフトは不変。	\
-		  CF ^ MSB(DEST)			*/	\
-		(res ^ res << 1) & SFT_AND##BWD?		\
+		   CF ^ MSB(res) -> MSB(dst) ^ MSB-1(dst) */	\
+		(dst ^ dst << 1) & MSB##BWD?			\
 			flagu8 |= OFSET8 : flagu8 &= ~OFSET8;	\
 	}
+
+#define FLAG8bSHRSAR(r) flag8 = flag_calb[r]
+#define FLAG8wSHRSAR(r) flag8 = flag_calw[r]
+#define FLAG8dSHRSAR(r)				\
+	flag8 = pflag_cal[r & 0xff];		\
+	flag8 |= (r == 0)? ZF : 0;		\
+	flag8 |= (r & 0x80000000)? SF : 0;
 
 #define SFT_SHR(BWD, CNT)					\
 	eip++;							\
@@ -3229,13 +3260,13 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		mem->write##BWD(tmpadr, (BWD##CAST)res);	\
 	}							\
 	if (CNT != 0) {						\
-		flag8 = flag_cal##BWD[res]; /* CFオフ */	\
+		FLAG8##BWD##SHRSAR(res); /* CFオフ */		\
 		flag8 |= dst >> (CNT - 1) & 1; /* CF */		\
 		flag8 |= AF; /* NP2/NP21に合わせる */		\
 		/* OFは1シフトの時影響し、その他の場合は	\
 		   未定義だが常に計算する。0シフトは不変。	\
 		   MSB(tempDEST)			*/	\
-		(dst & SFT_AND2##BWD)?				\
+		(dst & MSB##BWD)?				\
 			flagu8 |= OFSET8 : flagu8 &= ~OFSET8;	\
 	}
 
@@ -3244,7 +3275,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	if ((modrm & 0xc0) == 0xc0) {				\
 		dst = genreg##BWD(modrm & 7);			\
 		res = dst >> CNT;				\
-		if (dst & SFT_AND2##BWD) {			\
+		if (dst & MSB##BWD) {				\
 			res |= sar_bit##BWD[CNT];		\
 		}						\
 		genreg##BWD(modrm & 7) = (BWD##CAST)res;	\
@@ -3252,13 +3283,13 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		tmpadr = modrm_seg_ea(modrm);			\
 		dst = mem->read##BWD(tmpadr);			\
 		res = dst >> CNT;				\
-		if (dst & SFT_AND2##BWD) {			\
+		if (dst & MSB##BWD) {				\
 			res |= sar_bit##BWD[CNT];		\
 		}						\
 		mem->write##BWD(tmpadr, (BWD##CAST)res);	\
 	}							\
 	if (CNT != 0) {						\
-		flag8 = flag_calb[res]; /* CFオフ */		\
+		FLAG8##BWD##SHRSAR(res); /* CFオフ */		\
 		flag8 |= dst >> (CNT - 1) & 1; /* CF */		\
 		flag8 |= AF; /* NP2/NP21に合わせる */		\
 		/* OFは1シフトの時影響し、その他の場合は	\
@@ -3282,21 +3313,21 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		switch (subop) {
 		// D0 /4 r/m8
 		case 0x0: // ROL r/m8
-			ROT_RM(b, L, 1, dst, res = dst >> 7 | dst << 1);
+			ROT_RM(b, L, 1, res = dst >> 7 | dst << 1);
 			break;
 		case 0x1: // ROR r/m8
-			ROT_RM(b, R, 1, res, res = dst << 7 | dst >> 1);
+			ROT_RM(b, R, 1, res = dst << 7 | dst >> 1);
 			break;
 		case 0x2: // RCL r/m8
-			ROT_RM(b, L, 1, dst, res = dst << 1 | (flag8 & CF));
+			ROT_RM(b, L, 1, res = dst << 1 | (flag8 & CF));
 			break;
 		case 0x3: // RCR r/m8
-			ROT_RM(b, R, 1, dst, res = dst >> 1 | (flag8 & CF) << 7);
+			ROT_RM(b, R, 1, res = dst >> 1 | (flag8 & CF) << 7);
 			break;
 		case 0x4: // SAL/SHL r/m8
 			// go through
 		case 0x6:
-			SFT_SALSHL(b, 1, & 0x1ff);
+			SFT_SALSHL(b, 1);
 			break;
 		case 0x5: // SHR r/m8
 			SFT_SHR(b, 1);
@@ -3316,21 +3347,21 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		switch (subop) {
 		// D1 /4 r/m16
 		case 0x0: // ROL r/m16 (xxx ROL r/m32)
-			ROT_RM(w, L, 1, dst, res = dst >> 15 | dst << 1);
+			ROT_RM(w, L, 1, res = dst >> 15 | dst << 1);
 			break;
 		case 0x1: // ROR r/m16
-			ROT_RM(w, R, 1, res, res = dst << 15 | dst >> 1);
+			ROT_RM(w, R, 1, res = dst << 15 | dst >> 1);
 			break;
 		case 0x2: // RCL r/m16
-			ROT_RM(w, L, 1, dst, res = dst << 1 | (flag8 & CF));
+			ROT_RM(w, L, 1, res = dst << 1 | (flag8 & CF));
 			break;
 		case 0x3: // RCR r/m16
-			ROT_RM(w, R, 1, dst, res = dst >> 1 | (flag8 & CF) << 15);
+			ROT_RM(w, R, 1, res = dst >> 1 | (flag8 & CF) << 15);
 			break;
 		case 0x4: // SAL/SHL r/m16 (SAL/SHL r/m32)
 			// go through
 		case 0x6:
-			SFT_SALSHL(w, 1, & 0x1ffff);
+			SFT_SALSHL(w, 1);
 			break;
 		case 0x5: // SHR r/m16
 			SFT_SHR(w, 1);
@@ -3352,35 +3383,35 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		case 0x0: // ROL r/m8, CL
 			src = cl % 8;
 			if (src != 0) {
-				ROT_RM(b, L, src, dst,
+				ROT_RM(b, L, src,
 					 res = dst >> (8 - src) | dst << src);
 			}
 			break;
 		case 0x1: // ROR r/m8, CL
 			src = cl % 8;
 			if (src != 0) {
-				ROT_RM(b, R, src, res,
+				ROT_RM(b, R, src,
 					 res = dst << (8 - src) | dst >> src);
 			}
 			break;
 		case 0x2: // RCL r/m8, CL
 			src = cl % 8;
 			if (src != 0) {
-				ROT_RM(b, L, src, dst,
+				ROT_RM(b, L, src,
 					 res = dst << src | (flag8 & CF) << (src - 1) | dst >> (8 - src + 1));
 			}
 			break;
 		case 0x3: // RCR r/m8, CL
 			src = cl % 8;
 			if (src != 0) {
-				ROT_RM(b, R, src, dst,
+				ROT_RM(b, R, src,
 					 res = dst >> src | (flag8 & CF) << (8 - src) | dst << (8 - src + 1));
 			}
 			break;
 		case 0x4: // SAL/SHL r/m8, CL
 			// go through
 		case 0x6:
-			SFT_SALSHL(b, cl, & 0x1ff);
+			SFT_SALSHL(b, cl);
 			break;
 		case 0x5: // SHR r/m8, CL
 			SFT_SHR(b, cl);
@@ -3402,28 +3433,28 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		case 0x0: // ROL r/m16, CL
 			src = cl % 16;
 			if (src != 0) {
-				ROT_RM(w, L, src, dst,
+				ROT_RM(w, L, src,
 					 res = dst >> (16 - src) | dst << src);
 			}
 			break;
 		case 0x1: // ROR r/m16, CL
 			src = cl % 16;
 			if (src != 0) {
-				ROT_RM(w, R, src, res,
+				ROT_RM(w, R, src,
 					 res = dst << (16 - src) | dst >> src);
 			}
 			break;
 		case 0x2: // RCL r/m16, CL
 			src = cl % 16;
 			if (src != 0) {
-				ROT_RM(w, L, src, dst,
+				ROT_RM(w, L, src,
 					 res = dst << src | (flag8 & CF) << (src - 1) | dst >> (16 - src + 1));
 			}
 			break;
 		case 0x3: // RCR r/m16, CL
 			src = cl % 16;
 			if (src != 0) {
-				ROT_RM(w, R, src, dst,
+				ROT_RM(w, R, src,
 					 res = dst >> src | (flag8 & CF) << (16 - src) | dst << (16 - src + 1));
 			}
 			break;
@@ -3431,7 +3462,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		case 0x4: // SAL/SHL r/m16, CL (SAL/SHL r/m32, CL)
 			// go through
 		case 0x6:
-			SFT_SALSHL(w, cl, & 0x1ffff);
+			SFT_SALSHL(w, cl);
 			break;
 		case 0x5: // SHR r/m16, CL
 			SFT_SHR(w, cl);
