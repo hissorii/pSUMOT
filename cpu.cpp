@@ -1471,7 +1471,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 			res = dst - src;
 			eax = res;
 			eip += 4;
-			FLAG8dSUB(res, src, dst, & 0x1ffff, );
+			FLAG8dSUB(res, src, dst, , );
 			OF_SUBd(res, src, dst);
 		}
 		break;
@@ -2048,7 +2048,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	eip += IPINC##BWD2;					\
 	FLAG_LOGOP##BWD(dst)
 
-#define CMP_RM_IM(BWD, BWD2, ANDN, ANDN2)			\
+#define CMP_RM_IM(BWD, BWD2, ANDN)				\
 	eip++;							\
 	if ((modrm & 0xc0) == 0xc0) {				\
 		dst = genreg##BWD(modrm & 7);			\
@@ -2061,10 +2061,8 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		res = dst - src;				\
 	}							\
 	eip += IPINC##BWD2;					\
-	flag8 = flag_cal##BWD[res ANDN];			\
-	flag8 |= (dst ^ src ^ res) & AF;			\
-	(dst ^ res) & (dst ^ src) & ANDN2?			\
-		flagu8 |= OFSET8 : flagu8 &= ~OFSET8;
+	FLAG8##BWD##SUB(res, src, dst, ANDN, );			\
+	OF_SUB##BWD(res, src, dst)
 
 	case 0x80:
 		// go through
@@ -2099,7 +2097,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 			LOGOP_RM_IM(b, b, ^);
 			break;
 		case 7: // CMP r/m8, imm8
-			CMP_RM_IM(b, b, & 0x1ff, 0x80);
+			CMP_RM_IM(b, b, & 0x1ff);
 			break;
 		}
 		break;
@@ -2114,17 +2112,33 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 
 		switch (subop) {
 
-		case 0: // ADD r/m16, imm16
-			CAL_RM_IM(w, w, ADD, u16, 0, );
+		case 0: // ADD r/m16, imm16 (ADD r/m32, imm32)
+			if (opsize == size16) {
+				CAL_RM_IM(w, w, ADD, u16, 0, );
+			} else {
+				CAL_RM_IM(d, d, ADD, u32, 0, );
+			}
 			break;
-		case 1: // OR r/m16, imm16
-			LOGOP_RM_IM(w, w, |);
+		case 1: // OR r/m16, imm16 (OR r/m32, imm32)
+			if (opsize == size16) {
+				LOGOP_RM_IM(w, w, |);
+			} else {
+				LOGOP_RM_IM(d, d, |);
+			}
 			break;
-		case 2: // ADC r/m16, imm16
-			CAL_RM_IM(w, w, ADC, u16, (flag8 & CF), );
+		case 2: // ADC r/m16, imm16 (ADC r/m32, imm32)
+			if (opsize == size16) {
+				CAL_RM_IM(w, w, ADC, u16, (flag8 & CF), );
+			} else {
+				CAL_RM_IM(d, d, ADC, u32, (flag8 & CF), );
+			}
 			break;
-		case 3: // SBB r/m16, imm16
-			CAL_RM_IM(w, w, SBB, u16, -(flag8 & CF), & 0x1ffff);
+		case 3: // SBB r/m16, imm16 (SBB r/m32, imm32)
+			if (opsize == size16) {
+				CAL_RM_IM(w, w, SBB, u16, -(flag8 & CF), & 0x1ffff);
+			} else {
+				CAL_RM_IM(d, d, SBB, u32, -(flag8 & CF), );
+			}
 			break;
 		case 4: // AND r/m16, imm16 (AND r/m32, imm32)
 			if (opsize == size16) {
@@ -2133,15 +2147,27 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 				LOGOP_RM_IM(d, d, &);
 			}
 			break;
-		case 5: // SUB r/m16, imm16
-			CAL_RM_IM(w, w, SUB, u16, 0, & 0x1ffff);
+		case 5: // SUB r/m16, imm16 (SUB r/m32, imm32)
+			if (opsize == size16) {
+				CAL_RM_IM(w, w, SUB, u16, 0, & 0x1ffff);
+			} else {
+				CAL_RM_IM(d, d, SUB, u32, 0, );
+			}
 			break;
 
-		case 6: // XOR r/m16, imm16
-			LOGOP_RM_IM(w, w, ^);
+		case 6: // XOR r/m16, imm16 (XOR r/m32, imm32)
+			if (opsize == size16) {
+				LOGOP_RM_IM(w, w, ^);
+			} else {
+				LOGOP_RM_IM(d, d, ^);
+			}
 			break;
-		case 7: // CMP r/m16, imm16
-			CMP_RM_IM(w, w, & 0x1ffff, 0x8000);
+		case 7: // CMP r/m16, imm16 (CMP r/m32, im32)
+			if (opsize == size16) {
+				CMP_RM_IM(w, w, & 0x1ffff);
+			} else {
+				CMP_RM_IM(d, d, );
+			}
 			break;
 		}
 		break;
@@ -2152,35 +2178,66 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		subop = modrm >> 3 & 7;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + 2);
 		DAS_pr("%s ", str8x[subop]);
-		DAS_modrm(modrm, false, false, word);
+		DAS_modrm(modrm, false, false, word); // xxx size32を要考慮
 		DAS_pr("0x%02x\n\n", mem->read8(get_seg_adr(CS, eip + 1)));
 
 		switch (subop) {
-		case 0: // ADD r/m16, imm8
-			CAL_RM_IM(w, b, ADD, u16, 0, );
+		case 0: // ADD r/m16, imm8 (ADD r/m32, imm8)
+			if (opsize == size16) {
+				CAL_RM_IM(w, b, ADD, u16, 0, );
+			} else {
+				CAL_RM_IM(d, b, ADD, u32, 0, );
+			}
 			break;
-		case 1: // OR r/m16, imm8
-			LOGOP_RM_IM(w, b, |);
+		case 1: // OR r/m16, imm8 (OR r/m32, imm8)
+			if (opsize == size16) {
+				LOGOP_RM_IM(w, b, |);
+			} else {
+				LOGOP_RM_IM(d, b, |);
+			}
 			break;
-		case 2: // ADC r/m16, imm8
-			CAL_RM_IM(w, b, ADC, u16, (flag8 & CF), );
+		case 2: // ADC r/m16, imm8 (ADC r/m32, imm8)
+			if (opsize == size16) {
+				CAL_RM_IM(w, b, ADC, u16, (flag8 & CF), );
+			} else {
+				CAL_RM_IM(d, b, ADC, u32, (flag8 & CF), );
+			}
 			break;
-		case 3: // SBB r/m16, imm8
-			CAL_RM_IM(w, b, SBB, u16, -(flag8 & CF), & 0x1ffff);
+		case 3: // SBB r/m16, imm8 (SBB r/m32, imm8)
+			if (opsize == size16) {
+				CAL_RM_IM(w, b, SBB, u16, -(flag8 & CF), & 0x1ffff);
+			} else {
+				CAL_RM_IM(d, b, SBB, u32, -(flag8 & CF), );
+			}
 			break;
-		case 4: // AND r/m16, imm8
-			LOGOP_RM_IM(w, b, &);
+		case 4: // AND r/m16, imm8 (AND r/m32, imm8)
+			if (opsize == size16) {
+				LOGOP_RM_IM(w, b, &);
+			} else {
+				LOGOP_RM_IM(d, b, &);
+			}
 			break;
-		case 5: // SUB r/m16, imm8
-			CAL_RM_IM(w, b, SUB, u16, 0, & 0x1ffff);
+		case 5: // SUB r/m16, imm8 (SUB r/m32, imm8)
+			if (opsize == size16) {
+				CAL_RM_IM(w, b, SUB, u16, 0, & 0x1ffff);
+			} else {
+				CAL_RM_IM(d, b, SUB, u32, 0, );
+			}
 			break;
-		case 6: // XOR r/m16, imm8
-			LOGOP_RM_IM(w, b, ^);
+		case 6: // XOR r/m16, imm8 (XOR r/m32, imm8)
+			if (opsize == size16) {
+				LOGOP_RM_IM(w, b, ^);
+			} else {
+				LOGOP_RM_IM(d, b, ^);
+			}
 			break;
-		case 7: // CMP r/m16, imm8
-			CMP_RM_IM(w, b, & 0x1ffff, 0x8000);
+		case 7: // CMP r/m16, imm8 (CMP r/m32, imm8)
+			if (opsize == size16) {
+				CMP_RM_IM(w, b, & 0x1ffff);
+			} else {
+				CMP_RM_IM(d, b, );
+			}
 			break;
-
 		}
 		break;
 
@@ -2215,40 +2272,83 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	case 0x86: // XCHG r8, r/m8 or XCHG r/m8, r8
 		XCHG_R_RM(b);
 		break;
-	case 0x87: // XCHG r16, r/m16 or XCHG r/m16, r16
-		XCHG_R_RM(w);
+	case 0x87: // XCHG r16, r/m16 or XCHG r/m16, r16 (XCHG r32, r/m32 or XCHG r/m32, r32)
+		if (opsize == size16) {
+			XCHG_R_RM(w);
+		} else {
+			XCHG_R_RM(d);
+		}
 		break;
 
-#define XCHG_GENREG(reg)		\
+#define XCHG_GENREGW(reg)		\
 	DAS_prt_post_op(0);		\
 	DAS_pr("XCHG AX, "#reg"\n\n");	\
 	dst = ax;			\
 	ax = reg;			\
 	reg = dst;
 
-	case 0x90: // XCHG AX
-		XCHG_GENREG(ax);
+#define XCHG_GENREGD(reg)		\
+	DAS_prt_post_op(0);		\
+	DAS_pr("XCHG EAX, "#reg"\n\n");	\
+	dst = eax;			\
+	eax = reg;			\
+	reg = dst;
+
+	case 0x90: // XCHG AX (XCHG EAX)
+		if (opsize == size16) {
+			XCHG_GENREGW(ax);
+		} else {
+			XCHG_GENREGW(eax);
+		}
 		break;
-	case 0x91: // XCHG CX
-		XCHG_GENREG(cx);
+	case 0x91: // XCHG CX (XCHG ECX)
+		if (opsize == size16) {
+			XCHG_GENREGW(cx);
+		} else {
+			XCHG_GENREGW(ecx);
+		}
 		break;
-	case 0x92: // XCHG DX
-		XCHG_GENREG(dx);
+	case 0x92: // XCHG DX (XCHG EDX)
+		if (opsize == size16) {
+			XCHG_GENREGW(dx);
+		} else {
+			XCHG_GENREGW(edx);
+		}
 		break;
-	case 0x93: // XCHG BX
-		XCHG_GENREG(bx);
+	case 0x93: // XCHG BX (XCHG EBX)
+		if (opsize == size16) {
+			XCHG_GENREGW(bx);
+		} else {
+			XCHG_GENREGW(ebx);
+		}
 		break;
-	case 0x94: // XCHG SP
-		XCHG_GENREG(sp);
+	case 0x94: // XCHG SP (XCHG ESP)
+		if (opsize == size16) {
+			XCHG_GENREGW(sp);
+		} else {
+			XCHG_GENREGW(esp);
+		}
 		break;
-	case 0x95: // XCHG BP
-		XCHG_GENREG(bp);
+	case 0x95: // XCHG BP (XCHG EBP)
+		if (opsize == size16) {
+			XCHG_GENREGW(bp);
+		} else {
+			XCHG_GENREGW(ebp);
+		}
 		break;
-	case 0x96: // XCHG SI
-		XCHG_GENREG(si);
+	case 0x96: // XCHG SI (XCHG ESI)
+		if (opsize == size16) {
+			XCHG_GENREGW(si);
+		} else {
+			XCHG_GENREGW(esi);
+		}
 		break;
-	case 0x97: // XCHG DI
-		XCHG_GENREG(di);
+	case 0x97: // XCHG DI (XCHG EDI)
+		if (opsize == size16) {
+			XCHG_GENREGW(di);
+		} else {
+			XCHG_GENREGW(edi);
+		}
 		break;
 
 /******************** MOV ********************/
@@ -2277,10 +2377,18 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		DAS_pr("MOV ");
 		DAS_modrm(modrm, true, false, word);
 		eip++;
-		if ((modrm & 0xc0) == 0xc0) {
-			genregw(modrm & 0x07) = genregw(modrm >> 3 & 7);
+		if (opsize == size16) {
+			if ((modrm & 0xc0) == 0xc0) {
+				genregw(modrm & 0x07) = genregw(modrm >> 3 & 7);
+			} else {
+				mem->write16(modrm_seg_ea(modrm), genregw(modrm >> 3 & 7));
+			}
 		} else {
-			mem->write16(modrm_seg_ea(modrm), genregw(modrm >> 3 & 7));
+			if ((modrm & 0xc0) == 0xc0) {
+				genregd(modrm & 0x07) = genregd(modrm >> 3 & 7);
+			} else {
+				mem->write32(modrm_seg_ea(modrm), genregd(modrm >> 3 & 7));
+			}
 		}
 		break;
 
@@ -2440,21 +2548,21 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		DAS_pr("MOV %s, 0x%02x\n\n", genreg_name[0][op & 7], mem->read8(get_seg_adr(CS, eip)));
 		*genregb[op & 7] = mem->read8(get_seg_adr(CS, eip++));
 		break;
-	case 0xb8: // MOV AX, imm16
+	case 0xb8: // MOV AX, imm16 (MOV EAX, imm32)
 		// go through
-	case 0xb9: // MOV CX, imm16
+	case 0xb9: // MOV CX, imm16 (MOV ECX, imm32)
 		// go through
-	case 0xba: // MOV DX, imm16
+	case 0xba: // MOV DX, imm16 (MOV EDX, imm32)
 		// go through
-	case 0xbb: // MOV BX, imm16
+	case 0xbb: // MOV BX, imm16 (MOV EBX, imm32)
 		// go through
-	case 0xbc: // MOV SP, imm16
+	case 0xbc: // MOV SP, imm16 (MOV ESP, imm32)
 		// go through
-	case 0xbd: // MOV BP, imm16
+	case 0xbd: // MOV BP, imm16 (MOV EBP, imm32)
 		// go through
-	case 0xbe: // MOV SI, imm16
+	case 0xbe: // MOV SI, imm16 (MOV ESI, imm32)
 		// go through
-	case 0xbf: // MOV DI, imm16
+	case 0xbf: // MOV DI, imm16 (MOV EDI, imm32)
 		if (opsize == size16) {
 			DAS_prt_post_op(2);
 			DAS_pr("MOV %s, 0x%04x\n\n", genreg_name[1][op & 7], mem->read16(get_seg_adr(CS, eip)));
@@ -2488,18 +2596,33 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 			eip++;
 		}
 		break;
-	case 0xc7: // MOV r/m16, imm16
-		modrm = mem->read8(get_seg_adr(CS, eip));
-		DAS_prt_post_op(nr_disp_modrm(modrm) + 2);
-		DAS_pr("MOV ");
-		DAS_modrm(modrm, false, false, word);
-		DAS_pr("0x%04x\n\n", mem->read16(get_seg_adr(CS, eip + nr_disp_modrm(modrm) + 1)));
-		eip++;
-		if ((modrm & 0xc0) == 0xc0) {
-			genregw(modrm & 7) = mem->read16(get_seg_adr(CS, eip));
+	case 0xc7: // MOV r/m16, imm16 (MOV r/m32, imm32)
+		if (opsize == size16) {
+			modrm = mem->read8(get_seg_adr(CS, eip));
+			DAS_prt_post_op(nr_disp_modrm(modrm) + 2);
+			DAS_pr("MOV ");
+			DAS_modrm(modrm, false, false, word);
+			DAS_pr("0x%04x\n\n", mem->read16(get_seg_adr(CS, eip + nr_disp_modrm(modrm) + 1)));
+			eip++;
+			if ((modrm & 0xc0) == 0xc0) {
+				genregw(modrm & 7) = mem->read16(get_seg_adr(CS, eip));
+			} else {
+				mem->write16(modrm_seg_ea(modrm), mem->read16(get_seg_adr(CS, eip)));
+				eip += 2;
+			}
 		} else {
-			mem->write16(modrm_seg_ea(modrm), mem->read16(get_seg_adr(CS, eip)));
-			eip += 2;
+			modrm = mem->read8(get_seg_adr(CS, eip));
+			DAS_prt_post_op(nr_disp_modrm(modrm) + 4);
+			DAS_pr("MOV ");
+			DAS_modrm(modrm, false, false, dword);
+			DAS_pr("0x%08x\n\n", mem->read32(get_seg_adr(CS, eip + nr_disp_modrm(modrm) + 1)));
+			eip++;
+			if ((modrm & 0xc0) == 0xc0) {
+				genregd(modrm & 7) = mem->read32(get_seg_adr(CS, eip));
+			} else {
+				mem->write32(modrm_seg_ea(modrm), mem->read32(get_seg_adr(CS, eip)));
+				eip += 4;
+			}
 		}
 		break;
 
@@ -2519,30 +2642,39 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		dst = mem->read##BWD(modrm_seg_ea(modrm))	\
 			& genreg##BWD(modrm >> 3 & 7);		\
 	}							\
-	flag8 = flag_cal##BWD[dst];				\
-	flagu8 &= ~OFSET8;
+	FLAG_LOGOP##BWD(dst)
 
 	case 0x84: // TEST r/m8, r8
 		TEST_RM_R(b);
 		break;
 	case 0x85: // TEST r/m16, r16 (TEST rm/32, r32)
-		TEST_RM_R(w);
+		if (opsize == size16) {
+			TEST_RM_R(w);
+		} else {
+			TEST_RM_R(d);
+		}
 		break;
 
 	case 0xa8: // test al, imm8
 		DAS_prt_post_op(1);
 		DAS_pr("TEST AL, 0x%02x\n\n", mem->read8(get_seg_adr(CS, eip)));
 		dst = al & mem->read8(get_seg_adr(CS, eip++));
-		flag8 = flag_calb[dst];
-		flagu8 &= ~OFSET8;
+		FLAG_LOGOPb(dst);
 		break;
 	case 0xa9: // test ax, imm16 (test eax, imm32)
-		DAS_prt_post_op(2);
-		DAS_pr("TEST AX, 0x%04x\n\n", mem->read16(get_seg_adr(CS, eip)));
-		dst = ax & mem->read16(get_seg_adr(CS, eip));
-		eip += 2;
-		flag8 = flag_calw[dst];
-		flagu8 &= ~OFSET8;
+		if (opsize == size16) {
+			DAS_prt_post_op(2);
+			DAS_pr("TEST AX, 0x%04x\n\n", mem->read16(get_seg_adr(CS, eip)));
+			dst = ax & mem->read16(get_seg_adr(CS, eip));
+			eip += 2;
+			FLAG_LOGOPw(dst);
+		} else {
+			DAS_prt_post_op(4);
+			DAS_pr("TEST EAX, 0x%08x\n\n", mem->read32(get_seg_adr(CS, eip)));
+			dst = eax & mem->read32(get_seg_adr(CS, eip));
+			eip += 4;
+			FLAG_LOGOPd(dst);
+		}
 		break;
 
 /******************** CBW/CWD/CDQ ********************/
@@ -2554,11 +2686,20 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		break;
 	case 0x99: // CWD (CDQ)
 		DAS_prt_post_op(0);
-		DAS_pr("CWD\n\n");
-		if (ax & 0x8000) {
-			dx = 0xffff;
+		if (opsize == size16) {
+			DAS_pr("CWD\n\n");
+			if (ax & 0x8000) {
+				dx = 0xffff;
+			} else {
+				dx = 0;
+			}
 		} else {
-			dx = 0;
+			DAS_pr("CDQ\n\n");
+			if (eax & 0x80000000) {
+				edx = 0xffffffff;
+			} else {
+				edx = 0;
+			}
 		}
 		break;
 
@@ -2599,7 +2740,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 				si++;
 				cnt--;
 			}
-		} else {
+		} else { // 8bit処理でもopsize32用の対応が必要
 			(repe_prefix)? cnt = ecx, ecx = 0 : cnt = 1;
 			while (cnt != 0) {
 				mem->write8(get_seg_adr(ES, edi),
@@ -2612,14 +2753,26 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		break;
 	case 0xa5: // MOVS m16, m16 (MOVS m32, m32)
 		DAS_prt_post_op(0);
-		DAS_pr("MOVSW\n\n");
-	        (repe_prefix)? cnt = cx, cx = 0 : cnt = 1;
-		while (cnt != 0) {
-			mem->write16(get_seg_adr(ES, di),
-				     mem->read16(get_seg_adr(DS, si)));
-			di += 2;
-			si += 2;
-			cnt--;
+		if (opsize == size16) {
+			DAS_pr("MOVSW\n\n");
+			(repe_prefix)? cnt = cx, cx = 0 : cnt = 1;
+			while (cnt != 0) {
+				mem->write16(get_seg_adr(ES, di),
+					     mem->read16(get_seg_adr(DS, si)));
+				di += 2;
+				si += 2;
+				cnt--;
+			}
+		} else {
+			DAS_pr("MOVSD\n\n");
+			(repe_prefix)? cnt = ecx, ecx = 0 : cnt = 1;
+			while (cnt != 0) {
+				mem->write32(get_seg_adr(ES, edi),
+					    mem->read32(get_seg_adr(DS, esi)));
+				edi++;
+				esi++;
+				cnt--;
+			}
 		}
 		break;
 
