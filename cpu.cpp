@@ -607,17 +607,17 @@ void CPU::exec() {
 #define FLAG8dADC(r, s, d, CRY)					\
 	FLAG8dALL(r, s, d);					\
 	/* CF */						\
-	flag8 |= ((d >> 1) + (s >> 1) + (((d & 1) | (s & 1) | (CRY & 1)) >> 1)) >> 23;
+	flag8 |= ((d >> 1) + (s >> 1) + (((d & 1) + (s & 1) + (CRY & 1)) >> 1)) >> 31;
 
 #define FLAG8dSUB(r, s, d, CRY)					\
 	FLAG8dALL(r, s, d);					\
 	/* CF */						\
-	flag8 |= ((r >> 1) + (s >> 1) + (r & s & 1)) >> 23;
+	flag8 |= ((r >> 1) + (s >> 1) + (r & s & 1)) >> 31;
 
 #define FLAG8dSBB(r, s, d, CRY)					\
 	FLAG8dALL(r, s, d);					\
 	/* CF */						\
-	flag8 |= ((r >> 1) + (s >> 1) + (((r & 1) | (s & 1) | (CRY & 1)) >> 1)) >> 23;
+	flag8 |= ((r >> 1) + (s >> 1) + (((r & 1) + (s & 1) + (CRY & 1)) >> 1)) >> 31;
 
 #define OPADD +
 #define OPADC +
@@ -3039,138 +3039,17 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		break;
 
 /******************** Rotate/Shift ********************/
-/*
-          76  543 210
-+--------+-----------+---------+---------+--------+
-|11000000|mod op2 r/m|(DISP-LO)|(DISP-HI)|  data  |
-+--------+-----------+---------+---------+--------+
- */
-	case 0xc0: // 80386
-		modrm = mem->read8(get_seg_adr(CS, eip));
-		subop = modrm >> 3 & 7;
-		ndisp = nr_disp_modrm(modrm);
-		DAS_prt_post_op(ndisp + 2);
-		DAS_pr("%s ", strdx[subop]);
-		DAS_modrm(modrm, false, false, byte);
-		DAS_pr("0x%02x\n\n", mem->read8(get_seg_adr(CS, eip + ndisp + 1)));
-		switch (subop) {
-		// C0 /5 ib
-		case 0x5: // SHR r/m8, imm8
-			eip++;
-			src = mem->read8(get_seg_adr(CS, ndisp + eip));
-			if ((modrm & 0xc0) == 0xc0) {
-				dst = genregb(modrm & 0x07);
-				genregb(modrm & 0x07) = dst >> src;
-			} else {
-				tmpadr = modrm_seg_ea(modrm);
-				dst = mem->read8(tmpadr);
-				mem->write8(tmpadr, dst >> src);
-			}
-			eip++;
-			if (src != 0) { // xxx フラグは要再確認
-				flag8 = flag_calb[dst >> src];
-				flag8 |= AF; // NP2/NP21に合わせる
-				// 元の値の7bitと6bitを比較する
-				(src ^ src >> 1) & 0x40?
-					flagu8 |= OFSET8 : flagu8 &= ~OFSET8;
-			}
-			break;
-		default:
-			DAS_pr("xxxxx\n\n");
-		}
-		break;
-
-
-/*
-          76  543 210
-+--------+-----------+---------+---------+--------+
-|11000001|mod op2 r/m|(DISP-LO)|(DISP-HI)|  data  |
-+--------+-----------+---------+---------+--------+
- */
-	case 0xc1: // 80386
-		modrm = mem->read8(get_seg_adr(CS, eip));
-		subop = modrm >> 3 & 7;
-		ndisp = nr_disp_modrm(modrm);
-		DAS_prt_post_op(ndisp + 2);
-		DAS_pr("%s ", strdx[subop]);
-		DAS_modrm(modrm, false, false, word);
-		DAS_pr("0x%02x\n\n", mem->read8(get_seg_adr(CS, eip + ndisp + 1)));
-		switch (subop) {
-		// C1 /4 ib
-		case 0x4: // SAL/SHL r/m16, imm8 (SAL/SHL r/m32, imm8)
-			eip++;
-			src = mem->read8(get_seg_adr(CS, ndisp + eip));
-			if (opsize == size16) {
-				if ((modrm & 0xc0) == 0xc0) {
-					dst = genregw(modrm & 0x07);
-					genregw(modrm & 0x07) = dst << src;
-				} else {
-					tmpadr = modrm_seg_ea(modrm);
-					dst = mem->read16(tmpadr);
-					mem->write16(tmpadr, dst << src);
-				}
-				eip++;
-				flag8 = flag_calw[dst << src & 0x1ffff];
-				flag8 |= AF; // NP2/NP21に合わせる
-				// 元の値の15bitと14bitを比較する
-				(dst ^ dst >> 1) & 0x4000?
-					flagu8 |= OFSET8 : flagu8 &= ~OFSET8;
-			} else {
-				if ((modrm & 0xc0) == 0xc0) {
-					dst = genregd(modrm & 0x07);
-					res = dst << src;
-					genregd(modrm & 0x07) = res;
-				} else {
-					tmpadr = modrm_seg_ea(modrm);
-					dst = mem->read32(tmpadr);
-					res = dst << src;
-					mem->write32(tmpadr, res);
-				}
-				eip++;
-				flag8 = pflag_cal[res & 0xff];
-				flag8 |= (res == 0)? ZF : 0;
-				flag8 |= (res & 0x80000000)? SF : 0;
-				flag8 |= AF; // NP2/NP21に合わせる
-				// 元の値の31bitと30bitを比較する
-				(dst ^ dst >> 1) & 0x40000000?
-					flagu8 |= OFSET8 : flagu8 &= ~OFSET8;
-				// xxx CF flag
-			}
-			break;
-		// C1 /5 ib
-		case 0x5: // SHR r/m16, imm8 (xxx SHR r/m32, imm8)
-			eip++;
-			src = mem->read8(get_seg_adr(CS, ndisp + eip));
-			if ((modrm & 0xc0) == 0xc0) {
-				dst = genregw(modrm & 0x07);
-				genregw(modrm & 0x07) = dst >> src;
-			} else {
-				tmpadr = modrm_seg_ea(modrm);
-				dst = mem->read16(tmpadr);
-				mem->write16(tmpadr, dst >> src);
-			}
-			eip++;
-			if (src != 0) { // xxx フラグは要再確認
-				flag8 = flag_calw[dst >> src];
-				flag8 |= AF; // NP2/NP21に合わせる
-				// 元の値の15bitと14bitを比較する
-				(dst ^ dst >> 1) & 0x4000?
-					flagu8 |= OFSET8 : flagu8 &= ~OFSET8;
-			}
-			break;
-		default:
-			DAS_pr("xxxxx\n\n");
-		}
-		break;
 
 #define ROT_L <<
 #define ROT_R >>
 // MSB
 #define ROT_ANDLb 0x80
 #define ROT_ANDLw 0x8000
+#define ROT_ANDLd 0x80000000
 // LSB
 #define ROT_ANDRb 0x01
 #define ROT_ANDRw 0x0001
+#define ROT_ANDRd 0x00000001
 // MSBをLSBに右シフト
 #define MSB2LSB_SFTb 7
 #define MSB2LSB_SFTw 15
@@ -3209,14 +3088,14 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 #define MSBw 0x8000
 #define MSBd 0x80000000
 
-#define FLAG8bSALSHL(r) flag8 = flag_calb[r & 0x1ff]
-#define FLAG8wSALSHL(r) flag8 = flag_calw[r & 0x1ffff]
-#define FLAG8dSALSHL(r)				\
+#define FLAG8bSALSHL(r, cnt) flag8 = flag_calb[r & 0x1ff]
+#define FLAG8wSALSHL(r, cnt) flag8 = flag_calw[r & 0x1ffff]
+#define FLAG8dSALSHL(r, cnt)			\
 	flag8 = pflag_cal[r & 0xff];		\
 	flag8 |= (r == 0)? ZF : 0;		\
 	flag8 |= (r & 0x80000000)? SF : 0;	\
 	/* CF */				\
-	flag8 |= dst >> (CNT - 1) & 1;
+	flag8 |= dst >> (cnt - 1) & 1;
 
 #define SFT_SALSHL(BWD, CNT)					\
 	eip++;							\
@@ -3231,7 +3110,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		mem->write##BWD(tmpadr, (BWD##CAST)res);	\
 	}							\
 	if (CNT != 0) {						\
-		FLAG8##BWD##SALSHL(res);			\
+		FLAG8##BWD##SALSHL(res, CNT);			\
 		flag8 |= AF; /* NP2/NP21に合わせる */		\
 		/* OFは1シフトの時影響し、その他の場合は	\
 		   未定義だが常に計算する。0シフトは不変。	\
@@ -3252,7 +3131,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	if ((modrm & 0xc0) == 0xc0) {				\
 		dst = genreg##BWD(modrm & 0x07);		\
 		res = dst >> CNT;				\
-		genregb(modrm & 0x07) = (BWD##CAST)res;		\
+		genreg##BWD(modrm & 0x07) = (BWD##CAST)res;	\
 	} else {						\
 		tmpadr = modrm_seg_ea(modrm);			\
 		dst = mem->read##BWD(tmpadr);			\
@@ -3297,6 +3176,130 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		   常に0				*/	\
 		flagu8 &= ~OFSET8;				\
 	}
+
+/*
+          76  543 210
++--------+-----------+---------+---------+--------+
+|11000000|mod op2 r/m|(DISP-LO)|(DISP-HI)|  data  |
++--------+-----------+---------+---------+--------+
+ */
+	case 0xc0: // 80386
+		modrm = mem->read8(get_seg_adr(CS, eip));
+		subop = modrm >> 3 & 7;
+		ndisp = nr_disp_modrm(modrm);
+		DAS_prt_post_op(ndisp + 2);
+		DAS_pr("%s ", strdx[subop]);
+		DAS_modrm(modrm, false, false, byte);
+		DAS_pr("0x%02x\n\n", mem->read8(get_seg_adr(CS, eip + ndisp + 1)));
+		src = mem->read8(get_seg_adr(CS, ndisp + eip + 1));
+		src %= 8;
+		switch (subop) {
+		case 0x0: // ROL r/m8, imm8
+			ROT_RM(b, L, src, res = dst >> (8 - src) | dst << src);
+			break;
+		case 0x1: // ROR r/m8, imm8
+			ROT_RM(b, R, src, res = dst << (8 - src) | dst >> src);
+			break;
+		case 0x2: // RCL r/m8, imm8
+			ROT_RM(b, L, src, res = dst << src | (flag8 & CF) << (src - 1) | dst >> (8 - src + 1));
+			break;
+		case 0x3: // RCR r/m8, imm8
+			ROT_RM(b, R, src, res = dst >> src | (flag8 & CF) << (8 - src) | dst << (8 - src + 1));
+			break;
+		case 0x4: // SAL/SHL r/m8, imm8
+			// go through
+		case 0x6:
+			SFT_SALSHL(b, src);
+			break;
+		case 0x5: // SHR r/m8, imm8
+			SFT_SHR(b, src);
+			break;
+		case 0x7: // SAR r/m8, imm8
+			SFT_SAR(b, src);
+			break;
+		}
+		eip++;
+		break;
+
+/*
+          76  543 210
++--------+-----------+---------+---------+--------+
+|11000001|mod op2 r/m|(DISP-LO)|(DISP-HI)|  data  |
++--------+-----------+---------+---------+--------+
+ */
+	case 0xc1: // 80386
+		modrm = mem->read8(get_seg_adr(CS, eip));
+		subop = modrm >> 3 & 7;
+		ndisp = nr_disp_modrm(modrm);
+		DAS_prt_post_op(ndisp + 2);
+		DAS_pr("%s ", strdx[subop]);
+		DAS_modrm(modrm, false, false, word);
+		DAS_pr("0x%02x\n\n", mem->read8(get_seg_adr(CS, eip + ndisp + 1)));
+		src = mem->read8(get_seg_adr(CS, ndisp + eip + 1));
+		src = (opsize == size16)? src % 16 : src % 32;
+		switch (subop) {
+		case 0x0: // ROL r/m16, imm8 (ROL r/m32, imm8)
+			if (opsize == size16) {
+				ROT_RM(w, L, src,
+				       res = dst >> (16 - src) | dst << src);
+			} else {
+				ROT_RM(d, L, src,
+				       res = dst >> (32 - src) | dst << src);
+			}
+			break;
+		case 0x1: // ROR r/m16, imm8
+			if (opsize == size16) {
+				ROT_RM(w, R, src,
+				       res = dst << (16 - src) | dst >> src);
+			} else {
+				ROT_RM(d, R, src,
+				       res = dst << (32 - src) | dst >> src);
+			}
+			break;
+		case 0x2: // RCL r/m16, imm8
+			if (opsize == size16) {
+				ROT_RM(w, L, src,
+				       res = dst << src | (flag8 & CF) << (src - 1) | dst >> (16 - src + 1));
+			} else {
+				ROT_RM(d, L, src,
+				       res = dst << src | (flag8 & CF) << (src - 1) | dst >> (32 - src + 1));
+			}
+			break;
+		case 0x3: // RCR r/m16, imm8
+			if (opsize == size16) {
+				ROT_RM(w, R, src,
+				       res = dst >> src | (flag8 & CF) << (16 - src) | dst << (16 - src + 1));
+			} else {
+				ROT_RM(d, R, src,
+				       res = dst >> src | (flag8 & CF) << (32 - src) | dst << (32 - src + 1));
+			}
+			break;
+		case 0x4: // SAL/SHL r/m16, imm8
+			// go through
+		case 0x6:
+			if (opsize == size16) {
+				SFT_SALSHL(w, src);
+			} else {
+				SFT_SALSHL(d, src);
+			}
+			break;
+		case 0x5: // SHR r/m16, imm8
+			if (opsize == size16) {
+				SFT_SHR(w, src);
+			} else {
+				SFT_SHR(d, src);
+			}
+			break;
+		case 0x7: // SAR r/m16, imm8
+			if (opsize == size16) {
+				SFT_SAR(w, src);
+			} else {
+				SFT_SAR(d, src);
+			}
+			break;
+		}
+		eip++;
+		break;
 
 /*
           76  543 210
@@ -3346,28 +3349,56 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		DAS_modrm(modrm, false, true, word);
 		switch (subop) {
 		// D1 /4 r/m16
-		case 0x0: // ROL r/m16 (xxx ROL r/m32)
-			ROT_RM(w, L, 1, res = dst >> 15 | dst << 1);
+		case 0x0: // ROL r/m16 (ROL r/m32)
+			if (opsize == size16) {
+				ROT_RM(w, L, 1, res = dst >> 15 | dst << 1);
+			} else {
+				ROT_RM(d, L, 1, res = dst >> 31 | dst << 1);
+			}
 			break;
 		case 0x1: // ROR r/m16
-			ROT_RM(w, R, 1, res = dst << 15 | dst >> 1);
+			if (opsize == size16) {
+				ROT_RM(w, R, 1, res = dst << 15 | dst >> 1);
+			} else {
+				ROT_RM(d, R, 1, res = dst << 31 | dst >> 1);
+			}
 			break;
 		case 0x2: // RCL r/m16
-			ROT_RM(w, L, 1, res = dst << 1 | (flag8 & CF));
+			if (opsize == size16) {
+				ROT_RM(w, L, 1, res = dst << 1 | (flag8 & CF));
+			} else {
+				ROT_RM(d, L, 1, res = dst << 1 | (flag8 & CF));
+			}
 			break;
 		case 0x3: // RCR r/m16
-			ROT_RM(w, R, 1, res = dst >> 1 | (flag8 & CF) << 15);
+			if (opsize == size16) {
+				ROT_RM(w, R, 1, res = dst >> 1 | (flag8 & CF) << 15);
+			} else {
+				ROT_RM(d, R, 1, res = dst >> 1 | (flag8 & CF) << 31);
+			}
 			break;
 		case 0x4: // SAL/SHL r/m16 (SAL/SHL r/m32)
 			// go through
 		case 0x6:
-			SFT_SALSHL(w, 1);
+			if (opsize == size16) {
+				SFT_SALSHL(w, 1);
+			} else {
+				SFT_SALSHL(d, 1);
+			}
 			break;
 		case 0x5: // SHR r/m16
-			SFT_SHR(w, 1);
+			if (opsize == size16) {
+				SFT_SHR(w, 1);
+			} else {
+				SFT_SHR(d, 1);
+			}
 			break;
 		case 0x7: // SAR r/m16
-			SFT_SAR(w, 1);
+			if (opsize == size16) {
+				SFT_SAR(w, 1);
+			} else {
+				SFT_SAR(d, 1);
+			}
 			break;
 		}
 		break;
@@ -3379,30 +3410,27 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		DAS_pr("%s ", strdx[subop]);
 		DAS_modrm(modrm, false, false, byte);
 		DAS_pr("CL\n\n");
+		src = cl % 8;
 		switch (subop) {
 		case 0x0: // ROL r/m8, CL
-			src = cl % 8;
 			if (src != 0) {
 				ROT_RM(b, L, src,
 					 res = dst >> (8 - src) | dst << src);
 			}
 			break;
 		case 0x1: // ROR r/m8, CL
-			src = cl % 8;
 			if (src != 0) {
 				ROT_RM(b, R, src,
 					 res = dst << (8 - src) | dst >> src);
 			}
 			break;
 		case 0x2: // RCL r/m8, CL
-			src = cl % 8;
 			if (src != 0) {
 				ROT_RM(b, L, src,
 					 res = dst << src | (flag8 & CF) << (src - 1) | dst >> (8 - src + 1));
 			}
 			break;
 		case 0x3: // RCR r/m8, CL
-			src = cl % 8;
 			if (src != 0) {
 				ROT_RM(b, R, src,
 					 res = dst >> src | (flag8 & CF) << (8 - src) | dst << (8 - src + 1));
@@ -3429,46 +3457,75 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		DAS_pr("%s ", strdx[subop]);
 		DAS_modrm(modrm, false, false, word);
 		DAS_pr("CL\n\n");
+		src = (opsize == size16)? cl % 16 : cl % 32;
 		switch (subop) {
 		case 0x0: // ROL r/m16, CL
-			src = cl % 16;
 			if (src != 0) {
-				ROT_RM(w, L, src,
-					 res = dst >> (16 - src) | dst << src);
+				if (opsize == size16) {
+					ROT_RM(w, L, src,
+					       res = dst >> (16 - src) | dst << src);
+				} else {
+					ROT_RM(d, L, src,
+					       res = dst >> (32 - src) | dst << src);
+				}
 			}
 			break;
 		case 0x1: // ROR r/m16, CL
-			src = cl % 16;
 			if (src != 0) {
-				ROT_RM(w, R, src,
-					 res = dst << (16 - src) | dst >> src);
+				if (opsize == size16) {
+					ROT_RM(w, R, src,
+					       res = dst << (16 - src) | dst >> src);
+				} else {
+					ROT_RM(d, R, src,
+					       res = dst << (32 - src) | dst >> src);
+				}
 			}
 			break;
 		case 0x2: // RCL r/m16, CL
-			src = cl % 16;
 			if (src != 0) {
-				ROT_RM(w, L, src,
-					 res = dst << src | (flag8 & CF) << (src - 1) | dst >> (16 - src + 1));
+				if (opsize == size16) {
+					ROT_RM(w, L, src,
+					       res = dst << src | (flag8 & CF) << (src - 1) | dst >> (16 - src + 1));
+				} else {
+					ROT_RM(d, L, src,
+					       res = dst << src | (flag8 & CF) << (src - 1) | dst >> (32 - src + 1));
+				}
 			}
 			break;
 		case 0x3: // RCR r/m16, CL
-			src = cl % 16;
 			if (src != 0) {
-				ROT_RM(w, R, src,
-					 res = dst >> src | (flag8 & CF) << (16 - src) | dst << (16 - src + 1));
+				if (opsize == size16) {
+					ROT_RM(w, R, src,
+					       res = dst >> src | (flag8 & CF) << (16 - src) | dst << (16 - src + 1));
+				} else {
+					ROT_RM(d, R, src,
+					       res = dst >> src | (flag8 & CF) << (32 - src) | dst << (32 - src + 1));
+				}
 			}
 			break;
-		// D3 /4 r/m16
+			// D3 /4 r/m16
 		case 0x4: // SAL/SHL r/m16, CL (SAL/SHL r/m32, CL)
 			// go through
 		case 0x6:
-			SFT_SALSHL(w, cl);
+			if (opsize == size16) {
+				SFT_SALSHL(w, cl);
+			} else {
+				SFT_SALSHL(d, cl);
+			}
 			break;
 		case 0x5: // SHR r/m16, CL
-			SFT_SHR(w, cl);
+			if (opsize == size16) {
+				SFT_SHR(w, cl);
+			} else {
+				SFT_SHR(d, cl);
+			}
 			break;
 		case 0x7: // SAR r/m16, CL
-			SFT_SAR(w, cl);
+			if (opsize == size16) {
+				SFT_SAR(w, cl);
+			} else {
+				SFT_SAR(d, cl);
+			}
 			break;
 		}
 		break;
