@@ -6,11 +6,13 @@ CXXFLAGS += -Wall -g
 # for core debugging
 CXXFLAGS += -DCORE_DAS
 
+CXXFLAGS += `sdl2-config --cflags`
 
 OBJS = main.o cpu.o memory.o io.o bus.o
+LIBS = `sdl2-config --libs`
 
 $(TARGET): $(OBJS)
-	$(CXX) -o $@ $(OBJS)
+	$(CXX) -o $@ $(OBJS) $(LIBS)
 
 #dependencies
 cpu.o: cpu.h bus.h types.h
