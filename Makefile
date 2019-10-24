@@ -6,6 +6,9 @@ CXXFLAGS += -Wall -g
 # for core debugging
 CXXFLAGS += -DCORE_DAS
 
+# for video test
+CXXFLAGS += -DVIDEO_TEST
+
 CXXFLAGS += `sdl2-config --cflags`
 
 OBJS = main.o cpu.o memory.o io.o bus.o

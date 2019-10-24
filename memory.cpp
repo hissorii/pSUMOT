@@ -21,7 +21,15 @@ Memory::Memory(u32 size) {
 	fin.close();
 }
 
+/* memory mapped I/O */
+// グラフィックVRAM更新モードレジスタ
+#define GVRAM_UPD_REG 0xcff81
+// グラフィックVRAMページセレクトレジスタ
+#define GVRAM_PGSEL_REG 0xcff83
+
 u8 Memory::read8(u32 addr) {
+	u8 tmp, tmp2;
+
 	/*
 	  *1 ブートROM(システムROMの後半32KB)は、リセット時と
              I/O 048Hの操作時のみ、F8000H～FFFFFHにマッピングされる
@@ -54,6 +62,22 @@ u8 Memory::read8(u32 addr) {
 		return *(ram + addr);		
 	}
 
+
+	/*
+	  下記アドレスのVRAMはバンク切り替えで8枚ある。
+	  xxx それぞれ0x80000000, 0x80008000, 0x80010000,...にマッピングされる?
+
+	  0xc0000+------------+
+		 |  vram      |
+	  0xc8000+------------+
+	 */
+	// VRAM
+	if (addr >= 0xc0000 && addr < 0xc8000) {
+		tmp = this->read8(GVRAM_UPD_REG);
+		tmp2 = this->read8(GVRAM_PGSEL_REG);
+		return *(vram + (tmp >> 6) * 0x8000 + ((tmp2 >> 4) & 1) * 0x20000 + addr - 0xc0000);
+	}
+
 	// RAM
 	if (addr < ram_size) {
 		return *(ram + addr);
@@ -73,11 +97,36 @@ u8 Memory::read8(u32 addr) {
 		return *(sysrom + (addr - 0xfffc0000));
 	}
 
-	printf("not cocded yet. read addr=0x%x\n\n", addr);
+	printf("not coded yet. read addr=0x%x\n\n", addr);
 	exit(1);
 }
 
 void Memory::write8(u32 addr, u8 data) {
+	u8 tmp, tmp2;
+	u32 addr2;
+	u8 *p;
+
+	// VRAM
+	if (addr >= 0xc0000 && addr < 0xc8000) {
+		tmp = this->read8(GVRAM_UPD_REG);
+		tmp2 = this->read8(GVRAM_PGSEL_REG);
+		p = vram + ((tmp2 >> 4) & 1) * 0x20000;
+		addr2 = addr - 0xc0000;
+		// 各プレーンに書き込み
+		if (tmp & 1) {
+			*(p + addr2) = data;
+		}
+		if (tmp & 2) {
+			*(p + 0x8000 + addr2) = data;
+		}
+		if (tmp & 4) {
+			*(p + 0x10000 + addr2) = data;
+		}
+		if (tmp & 8) {
+			*(p + 0x18000 + addr2) = data;
+		}
+		return;
+	}
 
 	// RAM
 	if (addr < ram_size) {

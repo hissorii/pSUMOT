@@ -6,16 +6,30 @@
 
 int main(void)
 {
-	SDL_Window *sdl_window;
-	SDL_Surface *sdl_surface;
-	int *pt;
-	u8 r,g,b,a;
 
 	// RAM 6MB
 	Memory mem((u32)0x600000);
 	pSUMOT::IO io(0x10000);
 
 	CPU cpu(&mem);
+
+	cpu.reset();
+
+#ifdef VIDEO_TEST
+	for (int i = 0; i < 50000; i++) {
+		cpu.exec();
+	}
+#else
+	while (1) {
+		cpu.exec();
+	}
+#endif
+
+#ifdef VIDEO_TEST
+	SDL_Window *sdl_window;
+	SDL_Surface *sdl_surface;
+	int *pt;
+	u8 r,g,b,a;
 
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
 		printf("SDL_Init() error\n");
@@ -33,11 +47,6 @@ int main(void)
 	sdl_window = SDL_CreateWindow("hoge", 100, 100, 640, 480, 0);
 	sdl_surface = SDL_GetWindowSurface(sdl_window);
 
-	cpu.reset();
-	for (int i = 0; i < 50000; i++) {
-		cpu.exec();
-	}
-
 	printf("Bpp=%d\n", sdl_surface->format->BytesPerPixel);
 
 	pt = (int *)sdl_surface->pixels;
@@ -51,21 +60,22 @@ int main(void)
 
 	pt = (int *)sdl_surface->pixels;
 	for (int i = 0; i < 640*400/8; i++) {
-//		r = mem.read8(0x80000000 + i);
+		mem.write8(0xcff83, 0);
+		mem.write8(0xcff81, 0);
 		r = mem.read8(0xc0000 + i);
-		g = mem.read8(0x80010000 + i);
-		b = mem.read8(0x80020000 + i);
-		a = mem.read8(0x80030000 + i);
+		mem.write8(0xcff81, 0x40);
+		g = mem.read8(0xc0000 + i);
+		mem.write8(0xcff81, 0x80);
+		b = mem.read8(0xc0000 + i);
+		mem.write8(0xcff81, 0xc0);
+		a = mem.read8(0xc0000 + i);
 		for (int j = 0; j < 8; j++) {
-			if (r) *pt = 0xaaaa; else *pt = 0;
-			pt++;
-/*
+			// 各プレーンから1bitずつデータを取ってくる
 			*pt++ = ((a & 0x80) << 24) + ((r & 0x80) << 16) + ((g & 0x80) << 8) + (b & 0x80);
 			r <<= 1;
 			g <<= 1;
 			b <<= 1;
 			a <<= 1;
-*/
 		}
 	}
 
@@ -74,6 +84,7 @@ int main(void)
 	SDL_Delay(10000);
 
 	SDL_Quit();
+#endif //VIDEO_TEST
 
 	return 0;
 
