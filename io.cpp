@@ -1,4 +1,5 @@
 #include <cstdlib> // for malloc(), size_t
+#include <cstdio> // for printf()
 #include "io.h"
 
 /*-----
@@ -15,10 +16,16 @@ IO::IO(u32 size) {
 	io = this;
 }
 u8 IO::read8(u32 addr) {
+	if (addr != 0x480 && (addr < 0x3000 || addr >= 0x4000)) {
+		printf("io r 0x%x\n", addr);
+	}
 	return *(iop + addr);
 }
 
 void IO::write8(u32 addr, u8 data) {
+	if (addr < 0x3000 || addr >= 0x4000) {
+		printf("io w 0x%x(0x%x)\n", addr, data);
+	}
 	*(iop + addr) = data;
 }
 

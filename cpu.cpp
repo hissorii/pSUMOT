@@ -1641,7 +1641,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	dst = reg;						\
 	reg++;							\
 	flag8 &= CF; /* CF以外はリセット*/			\
-	flag8 |= pflag_cal[reg];				\
+	flag8 |= pflag_cal[reg & 0xff];				\
 	flag8 |= (reg == 0)? ZF : 0;				\
 	flag8 |= (eax & 0x80000000)? SF : 0;			\
 	flag8 |= (dst ^ reg) & AF;				\
@@ -1725,7 +1725,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 	dst = reg;						\
 	reg--;							\
 	flag8 &= CF; /* CF以外はリセット*/			\
-	flag8 |= pflag_cal[reg]; /* ここが|=なのでFLAG8dALL()は使えない */ \
+	flag8 |= pflag_cal[reg & 0xff]; /* ここが|=なのでFLAG8dALL()は使えない */ \
 	flag8 |= (reg == 0)? ZF : 0;				\
 	flag8 |= (eax & 0x80000000)? SF : 0;			\
 	flag8 |= (dst ^ reg) & AF;				\

@@ -20,9 +20,10 @@ int main(void)
 		cpu.exec();
 	}
 #else
-	while (1) {
+	for (int i = 0; i < 57500; i++) {
 		cpu.exec();
 	}
+
 #endif
 
 #ifdef VIDEO_TEST
@@ -60,13 +61,13 @@ int main(void)
 
 	pt = (int *)sdl_surface->pixels;
 	for (int i = 0; i < 640*400/8; i++) {
-		mem.write8(0xcff83, 0);
+		mem.write8(0xcff83, 0x0);
 		mem.write8(0xcff81, 0);
-		r = mem.read8(0xc0000 + i);
-		mem.write8(0xcff81, 0x40);
-		g = mem.read8(0xc0000 + i);
-		mem.write8(0xcff81, 0x80);
 		b = mem.read8(0xc0000 + i);
+		mem.write8(0xcff81, 0x40);
+		r = mem.read8(0xc0000 + i);
+		mem.write8(0xcff81, 0x80);
+		g = mem.read8(0xc0000 + i);
 		mem.write8(0xcff81, 0xc0);
 		a = mem.read8(0xc0000 + i);
 		for (int j = 0; j < 8; j++) {

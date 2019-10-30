@@ -7,7 +7,7 @@ CXXFLAGS += -Wall -g
 CXXFLAGS += -DCORE_DAS
 
 # for video test
-CXXFLAGS += -DVIDEO_TEST
+#CXXFLAGS += -DVIDEO_TEST
 
 CXXFLAGS += `sdl2-config --cflags`
 

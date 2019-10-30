@@ -130,11 +130,6 @@ void Memory::write8(u32 addr, u8 data) {
 
 	// RAM
 	if (addr < ram_size) {
-		if (addr >= 0xc0000 && addr < 0xf0000) {
-			if (data != 0 && data != 0xff) {
-				printf("w vram addr=0x%x(0x%x)\n", addr, data);
-			}
-		}
 		*(ram + addr) = data;
 		return;
 	}
