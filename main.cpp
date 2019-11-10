@@ -20,7 +20,8 @@ int main(void)
 		cpu.exec();
 	}
 #else
-	for (int i = 0; i < 57500; i++) {
+	//	for (int i = 0; i < 57500; i++) {
+	for (int i = 0; i < 1000000; i++) {
 		cpu.exec();
 	}
 

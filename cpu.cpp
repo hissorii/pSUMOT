@@ -104,10 +104,14 @@ void CPU::DAS_dump_reg() {
 	for (i = 0; i < NR_SEGREG; i++) {
 		printf("%s:%04x ", segreg_name[i], segreg[i]);
 	}
+#if 0 // MAMEとの比較用に一時的にcr0を0にする
 	printf("         cr0:%08x", cr[0]);
+#else
+	printf("         cr0:%08x", 0);
+#endif
 	printf("\n\n");
 
-#if 1
+#if 0
 	int j, startadr;
 	if (step == 120) {
                 for (i = 0; i < 32; i++) {
@@ -142,6 +146,7 @@ void CPU::DAS_prt_post_op(u8 n) {
 // regsize: バイト/ワード/ダブルワード/Fワード転送
 //   ただし、ワード指定でもopsizeがsize32の場合は関数内でダブルワードに変換する
 // POP m16でregのないModR/Mでコンマ不要の場合はisReg=false, isDest=trueにする
+// eipはmodR/Mをポイントしていること
 void CPU::DAS_modrm(u8 modrm, bool isReg, bool isDest, REGSIZE regsize) {
 	u8 mod, reg, rm, sib, idx, base;
 	u32 tip; // tmp ip
@@ -509,9 +514,13 @@ void CPU::exec() {
 	char strfe[8][4] = {"INC", "DEC", "", "", "", "", "", ""};
 	char strff[8][5] = {"INC", "DEC", "CALL", "CALL", "JMP", "JMP", "PUSH", ""};
 #endif
+#if 0	// MAMEとの比較用に一時的に変更
 	if (seg_ovride == 0 && !opsize_ovride && !addrsize_ovride &&!repe_prefix && !repne_prefix) {
 		DAS_dump_reg();
 	}
+#else
+	DAS_dump_reg();
+#endif
 
 	// リアルモードでip++した時に16bitをこえて0に戻る場合を考慮して、
 	// リアルモードの場合はeip++ではなくip++するようにした。
@@ -1043,7 +1052,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 
 #define POPD0(d)				\
 	d = mem->read32((segreg[SS] << 4) + esp);\
-	sp += 4;
+	esp += 4;
 
 #define POPW(d)					\
 	d = mem->read16(get_seg_adr(SS, sp));	\
@@ -1051,7 +1060,7 @@ OF/CF:クリア, SF/ZF/PF:結果による, AF:不定
 
 #define POPD(d)					\
 	d = mem->read32(get_seg_adr(SS, esp));	\
-	sp += 4;
+	esp += 4;
 
 #define POPW_GENREG(reg)		\
 	DAS_prt_post_op(0);		\
@@ -1921,15 +1930,58 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		case 0xa9: // POP GS
 			POP_SEG2(GS);
 			break;
-		case 0xb7: // MOVZX r32,r/m16
-			modrm = mem->read8(get_seg_adr(CS, ++eip));
+		case 0xb6: // MOVZX r16,r/m8 (MOVZX r32, r/m8)
+			modrm = mem->read8(get_seg_adr(CS, eip + 1));
 			DAS_prt_post_op(nr_disp_modrm(modrm) + 2);
+			eip++;
+			DAS_pr("MOVZX ");
+			// xxx 現状 MOVZX SP, AXの様にsrcが16bit表記になる
+			DAS_modrm(modrm, true, true, (opsize == size16)?word:dword);
+			eip++;
+			if (opsize == size16) {
+				genregw(modrm >> 3 & 7) = modrmb(modrm);
+			} else {
+				genregd(modrm >> 3 & 7) = modrmb(modrm);
+			}
+			break;
+		case 0xb7: // MOVZX r32,r/m16
+			modrm = mem->read8(get_seg_adr(CS, eip + 1));
+			DAS_prt_post_op(nr_disp_modrm(modrm) + 2);
+			eip++;
 			DAS_pr("MOVZX ");
 			// xxx 現状 MOVZX ESP, EAXの様にsrcが32bit表記になる
 			DAS_modrm(modrm, true, true, dword);
 			eip++;
 			genregd(modrm >> 3 & 7) = modrmw(modrm);
 			break;
+		case 0xbe: // MOVSX r16,r/m8 (MOVSX r32, r/m8)
+			modrm = mem->read8(get_seg_adr(CS, eip + 1));
+			DAS_prt_post_op(nr_disp_modrm(modrm) + 2);
+			eip++;
+			DAS_pr("MOVSX ");
+			// xxx 現状 MOVZX SP, AXの様にsrcが16bit表記になる
+			DAS_modrm(modrm, true, true, (opsize == size16)?word:dword);
+			eip++;
+			if (opsize == size16) {
+				src = modrmb(modrm);
+				genregw(modrm >> 3 & 7) = ((src & 0x80)?0xff00:0x0000) | src;
+			} else {
+				src = modrmb(modrm);
+				genregd(modrm >> 3 & 7) = ((src & 0x80)?0xffffff00:0x0000000) | src;
+			}
+			break;
+		case 0xbf: // MOVSX r32,r/m16
+			modrm = mem->read8(get_seg_adr(CS, eip + 1));
+			DAS_prt_post_op(nr_disp_modrm(modrm) + 2);
+			eip++;
+			DAS_pr("MOVSX ");
+			// xxx 現状 MOVSX ESP, EAXの様にsrcが32bit表記になる
+			DAS_modrm(modrm, true, true, dword);
+			eip++;
+			src = modrmw(modrm);
+			genregd(modrm >> 3 & 7) = ((src & 0x8000)?0xffff0000:0x0000000) | src;
+			break;
+
 		default:
 			DAS_pr("xxxxx\n");
 			// LFS/LGS/LSS... (80386)
@@ -2585,7 +2637,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
  */
 	case 0xc6: // MOV r/m8, imm8
 		modrm = mem->read8(get_seg_adr(CS, eip));
-		DAS_prt_post_op(nr_disp_modrm(modrm) + 1);
+		DAS_prt_post_op(nr_disp_modrm(modrm) + 2);
 		DAS_pr("MOV ");
 		DAS_modrm(modrm, false, false, byte);
 		DAS_pr("0x%02x\n", mem->read8(get_seg_adr(CS, eip + nr_disp_modrm(modrm) + 1)));
@@ -2593,14 +2645,16 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		if ((modrm & 0xc0) == 0xc0) {
 			genregb(modrm & 7) = mem->read8(get_seg_adr(CS, eip));
 		} else {
-			mem->write8(modrm_seg_ea(modrm), mem->read8(get_seg_adr(CS, eip)));
-			eip++;
+			// modrm_seg_ea()内でeipが更新されるので注意
+			tmpadr = modrm_seg_ea(modrm);
+			mem->write8(tmpadr, mem->read8(get_seg_adr(CS, eip)));
 		}
+		eip++;
 		break;
 	case 0xc7: // MOV r/m16, imm16 (MOV r/m32, imm32)
 		if (opsize == size16) {
 			modrm = mem->read8(get_seg_adr(CS, eip));
-			DAS_prt_post_op(nr_disp_modrm(modrm) + 2);
+			DAS_prt_post_op(nr_disp_modrm(modrm) + 3);
 			DAS_pr("MOV ");
 			DAS_modrm(modrm, false, false, word);
 			DAS_pr("0x%04x\n", mem->read16(get_seg_adr(CS, eip + nr_disp_modrm(modrm) + 1)));
@@ -2608,12 +2662,13 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 			if ((modrm & 0xc0) == 0xc0) {
 				genregw(modrm & 7) = mem->read16(get_seg_adr(CS, eip));
 			} else {
-				mem->write16(modrm_seg_ea(modrm), mem->read16(get_seg_adr(CS, eip)));
-				eip += 2;
+				tmpadr = modrm_seg_ea(modrm);
+				mem->write16(tmpadr, mem->read16(get_seg_adr(CS, eip)));
 			}
+			eip += 2;
 		} else {
 			modrm = mem->read8(get_seg_adr(CS, eip));
-			DAS_prt_post_op(nr_disp_modrm(modrm) + 4);
+			DAS_prt_post_op(nr_disp_modrm(modrm) + 5);
 			DAS_pr("MOV ");
 			DAS_modrm(modrm, false, false, dword);
 			DAS_pr("0x%08x\n", mem->read32(get_seg_adr(CS, eip + nr_disp_modrm(modrm) + 1)));
@@ -2621,9 +2676,10 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 			if ((modrm & 0xc0) == 0xc0) {
 				genregd(modrm & 7) = mem->read32(get_seg_adr(CS, eip));
 			} else {
-				mem->write32(modrm_seg_ea(modrm), mem->read32(get_seg_adr(CS, eip)));
-				eip += 4;
+				tmpadr = modrm_seg_ea(modrm);
+				mem->write32(tmpadr, mem->read32(get_seg_adr(CS, eip)));
 			}
+			eip += 4;
 		}
 		break;
 
@@ -3947,6 +4003,7 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 		subop = modrm >> 3 & 7;
 		DAS_prt_post_op(nr_disp_modrm(modrm) + (subop < 2)?3:1);
 		DAS_pr("%s ", strf6[subop]);
+		// xxx 32bit時のダンプ表示数を未考慮
 		DAS_modrm(modrm, false, (subop < 2)?false:true, word);
 		eip++;
 		switch (subop) {

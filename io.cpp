@@ -1,5 +1,6 @@
 #include <cstdlib> // for malloc(), size_t
 #include <cstdio> // for printf()
+#include <fstream>
 #include "io.h"
 
 /*-----
@@ -12,12 +13,41 @@
 namespace pSUMOT {
 
 IO::IO(u32 size) {
+	char buf[0x800];
 	iop = (u8 *)malloc((size_t)size);
 	io = this;
+
+	// SRAM読み込み(UNZ互換)
+	std::ifstream fin("cmos.dat", std::ios::in | std::ios::binary);
+	if (!fin) {
+		printf("can't open cmos.dat");
+		goto end;
+	}
+	fin.read((char *)buf, 0x800);
+	fin.close();
+	// 偶数アドレスのみに値を再配置していく
+	for (int i = 0; i < 0x800; i++) {
+		iop[0x3000 + i * 2] = buf[i];
+	}
+end:
+	return;
 }
 u8 IO::read8(u32 addr) {
 	if (addr != 0x480 && (addr < 0x3000 || addr >= 0x4000)) {
 		printf("io r 0x%x\n", addr);
+	}
+
+	// パッド1
+	if (addr == 0x4d0) {
+		return 0x7f; // とりあえず入力なしで返す
+	}
+	// パッド2
+	if (addr == 0x4d2) {
+		return 0x7f; // とりあえず入力なしで返す
+	}
+	// RAM size in MB
+	if (addr == 0x5e8) {
+		return 2; // とりあえず2MBで返す
 	}
 	return *(iop + addr);
 }

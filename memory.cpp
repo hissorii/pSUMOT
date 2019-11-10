@@ -68,14 +68,27 @@ u8 Memory::read8(u32 addr) {
 	  xxx それぞれ0x80000000, 0x80008000, 0x80010000,...にマッピングされる?
 
 	  0xc0000+------------+
-		 |  vram      |
+		 |  vram 32KB |
 	  0xc8000+------------+
+		 |I/OCVRAM32KB|
+	  0xd0000+------------+
+		 |辞書ROM 32KB|
+	  0xd8000+------------+
+		 |            |
+		 |            |
+	  0xeffff+------------+
+
 	 */
-	// VRAM
-	if (addr >= 0xc0000 && addr < 0xc8000) {
-		tmp = this->read8(GVRAM_UPD_REG);
-		tmp2 = this->read8(GVRAM_PGSEL_REG);
-		return *(vram + (tmp >> 6) * 0x8000 + ((tmp2 >> 4) & 1) * 0x20000 + addr - 0xc0000);
+	// メインメモリ/VRAM (I/O 0x404の7bit目で決まる)
+	if (addr >= 0xc0000 && addr < 0xf0000) {
+		if (io->read8(0x404) & 0x80) {
+			return *(ram + addr);
+		}
+		if (addr >= 0xc0000 && addr < 0xc8000) {
+			tmp = this->read8(GVRAM_UPD_REG);
+			tmp2 = this->read8(GVRAM_PGSEL_REG);
+			return *(vram + (tmp >> 6) * 0x8000 + ((tmp2 >> 4) & 1) * 0x20000 + addr - 0xc0000);
+		}
 	}
 
 	// RAM
@@ -106,26 +119,32 @@ void Memory::write8(u32 addr, u8 data) {
 	u32 addr2;
 	u8 *p;
 
-	// VRAM
-	if (addr >= 0xc0000 && addr < 0xc8000) {
-		tmp = this->read8(GVRAM_UPD_REG);
-		tmp2 = this->read8(GVRAM_PGSEL_REG);
-		p = vram + ((tmp2 >> 4) & 1) * 0x20000;
-		addr2 = addr - 0xc0000;
-		// 各プレーンに書き込み
-		if (tmp & 1) {
-			*(p + addr2) = data;
+	// メインメモリ/VRAM (I/O 0x404の7bit目で決まる)
+	if (addr >= 0xc0000 && addr < 0xf0000) {
+		if (io->read8(0x404) & 0x80) {
+			*(ram + addr) = data;
+			return;
 		}
-		if (tmp & 2) {
-			*(p + 0x8000 + addr2) = data;
+		if (addr >= 0xc0000 && addr < 0xc8000) {
+			tmp = this->read8(GVRAM_UPD_REG);
+			tmp2 = this->read8(GVRAM_PGSEL_REG);
+			p = vram + ((tmp2 >> 4) & 1) * 0x20000;
+			addr2 = addr - 0xc0000;
+			// 各プレーンに書き込み
+			if (tmp & 1) {
+				*(p + addr2) = data;
+			}
+			if (tmp & 2) {
+				*(p + 0x8000 + addr2) = data;
+			}
+			if (tmp & 4) {
+				*(p + 0x10000 + addr2) = data;
+			}
+			if (tmp & 8) {
+				*(p + 0x18000 + addr2) = data;
+			}
+			return;
 		}
-		if (tmp & 4) {
-			*(p + 0x10000 + addr2) = data;
-		}
-		if (tmp & 8) {
-			*(p + 0x18000 + addr2) = data;
-		}
-		return;
 	}
 
 	// RAM
