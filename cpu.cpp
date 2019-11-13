@@ -611,7 +611,7 @@ void CPU::exec() {
 #define FLAG8dADD(r, s, d, CRY)					\
 	FLAG8dALL(r, s, d);					\
 	/* CF */						\
-	flag8 |= ((d >> 1) + (s >> 1) + (d & s & 1)) >> 23;
+	flag8 |= ((d >> 1) + (s >> 1) + (d & s & 1)) >> 31;
 
 // CRYは-1(0xff), 0, 1のいずれか
 #define FLAG8dADC(r, s, d, CRY)					\
@@ -2019,7 +2019,7 @@ CF:影響なし, OF/SF/ZF/AF/PF:結果による
 		JCC(JNE/JNZ, !(flag8 & ZF));
 		break;
 	case 0x76: // JBE/JNA rel8
-		JCC(JBE/JNA, flag8 & CF && flag8 & ZF);
+		JCC(JBE/JNA, flag8 & CF || flag8 & ZF);
 		break;
 	case 0x77: // JNBE/JA rel8
 		JCC(JNBE/JA, !(flag8 & CF) && !(flag8 & ZF));
@@ -4319,9 +4319,8 @@ OF/CF:0, SF/ZF/PF:結果による, AF:未定義
 		seg_ovride--;
 		// オーバーライドしたセグメントを元に戻す
 		if (seg_ovride == 0) {
-			// xxx プロテクトモードでは元のbaseを入れないとだめでは?
-			sdcr[DS].base = segreg[DS] << 4;
-			sdcr[SS].base = segreg[SS] << 4;
+			update_segreg(DS, segreg[DS]);
+			update_segreg(SS, segreg[SS]);
 		}
 	}
 

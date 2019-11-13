@@ -2,6 +2,7 @@
 #include "bus.h"
 
 #define SYSROM_SIZE 256*1024
+#define OSROM_SIZE 512*1024
 #define VRAM_SIZE 512*1024
 
 class Memory : public BUS {
@@ -9,6 +10,7 @@ private:
 	u8 *ram;
 	u32 ram_size;
 	u8 *sysrom;
+	u8 *osrom;
 	u8 *vram;
 	Memory *memo;
  public:

@@ -8,6 +8,7 @@ Memory::Memory(u32 size) {
 	memset(ram, 0, size);
 	ram_size = size;
 	sysrom = (u8 *)malloc((size_t)SYSROM_SIZE);
+	osrom = (u8 *)malloc((size_t)OSROM_SIZE);
 	vram = (u8 *)malloc((size_t)VRAM_SIZE);
 	memset(vram, 0, VRAM_SIZE);
 	mem = this;
@@ -19,6 +20,15 @@ Memory::Memory(u32 size) {
 	}
 	fin.read((char *)sysrom, SYSROM_SIZE);
 	fin.close();
+
+	// OS-ROMの読み込み
+	std::ifstream fin2("roms/FMT_DOS.ROM", std::ios::in | std::ios::binary);
+	if (!fin2) {
+		exit(1);
+	}
+	fin2.read((char *)osrom, OSROM_SIZE);
+	fin2.close();
+
 }
 
 /* memory mapped I/O */
@@ -108,6 +118,10 @@ u8 Memory::read8(u32 addr) {
 	if (addr >= 0xfffc0000) {
 		// システムROM領域内の値を返す
 		return *(sysrom + (addr - 0xfffc0000));
+	}
+
+	if (addr >= 0xc2000000 && addr < 0xc2080000) {
+		return *(osrom + (addr - 0xc2000000));
 	}
 
 	printf("not coded yet. read addr=0x%x\n\n", addr);

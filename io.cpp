@@ -33,10 +33,19 @@ end:
 	return;
 }
 u8 IO::read8(u32 addr) {
-	if (addr != 0x480 && (addr < 0x3000 || addr >= 0x4000)) {
+  //	if (addr != 0x480 && (addr < 0x3000 || addr >= 0x4000)) {
+	if (addr >= 0x4c0 && addr < 0x4d0) {
 		printf("io r 0x%x\n", addr);
 	}
 
+	// メモリカード
+	if (addr == 0x48a) {
+		return 0x06; // とりあえずカードなしで返す
+	}
+	// CDC
+	if (addr == 0x4c0) {
+		return 0x01; // とりあえず
+	}
 	// パッド1
 	if (addr == 0x4d0) {
 		return 0x7f; // とりあえず入力なしで返す
@@ -53,7 +62,8 @@ u8 IO::read8(u32 addr) {
 }
 
 void IO::write8(u32 addr, u8 data) {
-	if (addr < 0x3000 || addr >= 0x4000) {
+//	if (addr < 0x3000 || addr >= 0x4000) {
+	if (addr >= 0x4c0 && addr < 0x4d0) {
 		printf("io w 0x%x(0x%x)\n", addr, data);
 	}
 	*(iop + addr) = data;
