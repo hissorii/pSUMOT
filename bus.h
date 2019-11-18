@@ -12,6 +12,8 @@ protected:
 	  -----*/
 	static BUS *mem;
 	static BUS *io;
+	static BUS *dmac;
+	static BUS *cdc;
 public:
 	/*-----
 	  抽象仮想関数 [2019-08-08]

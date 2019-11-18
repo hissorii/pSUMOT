@@ -7,6 +7,8 @@
   -----*/
 BUS *BUS::mem = 0;
 BUS *BUS::io = 0;
+BUS *BUS::dmac = 0;
+BUS *BUS::cdc = 0;
 
 BUS* BUS::get_bus(const char *s) {
 	if (strcmp(s, "mem") == 0) {

@@ -38,6 +38,9 @@ u8 IO::read8(u32 addr) {
 		printf("io r 0x%x\n", addr);
 	}
 
+	if (addr >= 0xa0 && addr < 0xb0) {
+		return dmac->read8(addr);
+	}
 	// メモリカード
 	if (addr == 0x48a) {
 		return 0x06; // とりあえずカードなしで返す
