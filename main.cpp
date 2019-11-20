@@ -16,18 +16,6 @@ int main(void)
 	cpu.reset();
 
 #ifdef VIDEO_TEST
-	for (int i = 0; i < 50000; i++) {
-		cpu.exec();
-	}
-#else
-	//	for (int i = 0; i < 57500; i++) {
-	for (int i = 0; i < 1000000; i++) {
-		cpu.exec();
-	}
-
-#endif
-
-#ifdef VIDEO_TEST
 	SDL_Window *sdl_window;
 	SDL_Surface *sdl_surface;
 	int *pt;
@@ -50,44 +38,42 @@ int main(void)
 	sdl_surface = SDL_GetWindowSurface(sdl_window);
 
 	printf("Bpp=%d\n", sdl_surface->format->BytesPerPixel);
+#endif //VIDEO_TEST
 
-	pt = (int *)sdl_surface->pixels;
-	for (int i = 0; i < 10000; i++) {
-		*pt++ = 0xaaaa;
-	}
-
-	SDL_UpdateWindowSurface(sdl_window);
-
-	SDL_Delay(3000);
-
-	pt = (int *)sdl_surface->pixels;
-	for (int i = 0; i < 640*400/8; i++) {
-		mem.write8(0xcff83, 0x0);
-		mem.write8(0xcff81, 0);
-		b = mem.read8(0xc0000 + i);
-		mem.write8(0xcff81, 0x40);
-		r = mem.read8(0xc0000 + i);
-		mem.write8(0xcff81, 0x80);
-		g = mem.read8(0xc0000 + i);
-		mem.write8(0xcff81, 0xc0);
-		a = mem.read8(0xc0000 + i);
-		for (int j = 0; j < 8; j++) {
-			// 各プレーンから1bitずつデータを取ってくる
-			*pt++ = ((a & 0x80) << 24) + ((r & 0x80) << 16) + ((g & 0x80) << 8) + (b & 0x80);
-			r <<= 1;
-			g <<= 1;
-			b <<= 1;
-			a <<= 1;
+	while (1) {
+		for (int i = 0; i < 28000; i++) {
+			cpu.exec();
 		}
+
+#ifdef VIDEO_TEST
+		pt = (int *)sdl_surface->pixels;
+		for (int i = 0; i < 640*400/8; i++) {
+			mem.write8(0xcff83, 0x0);
+			mem.write8(0xcff81, 0);
+			b = mem.read8(0xc0000 + i);
+			mem.write8(0xcff81, 0x40);
+			r = mem.read8(0xc0000 + i);
+			mem.write8(0xcff81, 0x80);
+			g = mem.read8(0xc0000 + i);
+			mem.write8(0xcff81, 0xc0);
+			a = mem.read8(0xc0000 + i);
+			for (int j = 0; j < 8; j++) {
+				// 各プレーンから1bitずつデータを取ってくる
+				*pt++ = ((a & 0x80) << 24) + ((r & 0x80) << 16) + ((g & 0x80) << 8) + (b & 0x80);
+				r <<= 1;
+				g <<= 1;
+				b <<= 1;
+				a <<= 1;
+			}
+		}
+
+		SDL_UpdateWindowSurface(sdl_window);
+		SDL_Delay(10);
+#endif //VIDEO_TEST
 	}
-
-	SDL_UpdateWindowSurface(sdl_window);
-
-	SDL_Delay(10000);
-
+#ifdef VIDEO_TEST
 	SDL_Quit();
 #endif //VIDEO_TEST
 
 	return 0;
-
 }

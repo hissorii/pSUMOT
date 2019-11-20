@@ -305,6 +305,8 @@ private:
 	SIZEPRFX opsize, addrsize;
 	bool isRealMode;
 
+	u32 clks;
+
 	BUS *mem, *io;
 
 	u32 get_seg_adr(const SEGREG seg, const u32 a);
