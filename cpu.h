@@ -296,6 +296,14 @@ private:
 			    0xffffff80, 0xffffffc0, 0xffffffe0, 0xfffffff0,
 			    0xfffffff8, 0xfffffffc, 0xfffffffe};
 
+#ifdef CORE_DAS
+	char str8x[8][4] = {"ADD", "OR", "ADC", "SBB", "AND", "SUB", "", "CMP"};
+	char strdx[8][8] = {"ROL", "ROR", "RCL", "RCR", "SHL/SAL", "SHR", "", "SAR"};
+	char strf6[8][5] = {"TEST", "TEST", "NOT", "NEG", "MUL", "IMUL", "DIV", "IDIV"};
+	char strfe[8][4] = {"INC", "DEC", "", "", "", "", "", ""};
+	char strff[8][5] = {"INC", "DEC", "CALL", "CALL", "JMP", "JMP", "PUSH", ""};
+#endif
+
 	u8 seg_ovride = 0;
 	bool opsize_ovride = false;
 	bool addrsize_ovride = false;
@@ -318,7 +326,6 @@ private:
 	void DAS_dump_reg();
 	void DAS_prt_post_op(u8 n);
 	void DAS_modrm(u8 modrm, bool isReg, bool isDest, REGSIZE regsize);
-	void DAS_prt_rmr_rrm(const char *s, bool isReg, bool isDest, REGSIZE regsize);
 #endif
 	u8 nr_disp_modrm(u8 modrm);
 	u16 modrm16_ea(u8 modrm);
@@ -331,7 +338,7 @@ private:
 public:
 	CPU(BUS* bus);
 	void reset();
-	void exec();
+	void exec(u32 exec_clks);
 };
 
 /* 参考文献

@@ -41,9 +41,7 @@ int main(void)
 #endif //VIDEO_TEST
 
 	while (1) {
-		for (int i = 0; i < 28000; i++) {
-			cpu.exec();
-		}
+		cpu.exec(28000);
 
 #ifdef VIDEO_TEST
 		pt = (int *)sdl_surface->pixels;

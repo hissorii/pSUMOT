@@ -4,7 +4,7 @@ TARGET = psumot
 CXXFLAGS += -Wall -g
 
 # for core debugging
-#CXXFLAGS += -DCORE_DAS
+CXXFLAGS += -DCORE_DAS
 
 # for video test
 CXXFLAGS += -DVIDEO_TEST
@@ -18,7 +18,7 @@ $(TARGET): $(OBJS)
 	$(CXX) -o $@ $(OBJS) $(LIBS)
 
 #dependencies
-cpu.o: cpu_clocks.h cpu.h bus.h types.h
+cpu.o: cpu_clocks.h cpu_macros.h cpu.h bus.h types.h
 main.o: io.h cpu.h memory.h types.h
 memory.o: memory.h bus.h types.h
 io.o: io.h bus.h types.h
