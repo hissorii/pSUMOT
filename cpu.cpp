@@ -91,6 +91,10 @@ void CPU::DAS_dump_reg() {
 	int i;
 	static int step = 1;
 
+	if (op_continue) {
+		return;
+	}
+
 	printf("\n");
 	for (i = 0; i < 4; i++) {
 		printf("%s:%08x ", genreg_name[2][i], genregd(i));
@@ -137,6 +141,10 @@ void CPU::DAS_dump_reg() {
 
 void CPU::DAS_prt_post_op(u8 n) {
 	int i;
+
+	if (op_continue) {
+		return;
+	}
 	for (i = 0; i < n; i++)
 		printf(" %02x", mem->read8(get_seg_adr(CS, eip + i)));
 	for (i = 0; i < 5 - n; i++)
@@ -238,13 +246,15 @@ void CPU::DAS_modrm(u8 modrm, bool isReg, bool isDest, REGSIZE regsize) {
 	}
 }
 
-#define DAS_pr(...) printf(__VA_ARGS__)
+#define DAS_pr(...) if (!op_continue) printf(__VA_ARGS__)
+#define OP_CONTINUE() op_continue = true
 
 #else
 #define DAS_dump_reg()
 #define DAS_prt_post_op(n)
 #define DAS_modrm(m, isR, isD, isW)
 #define DAS_pr(...)
+#define OP_CONTINUE()
 #endif // CORE_DAS
 
 // modR/Mに続くディスプレースメントのバイト数を返す
@@ -512,7 +522,7 @@ void CPU::exec(u32 exec_clks) {
 	s32 incdec;
 
 	clks = exec_clks;
-	while (clks > 0) {
+	while (clks > 0) { // xxx マイナスになった分はどこかで補填する?
 
 #if 0	// MAMEとの比較用に一時的に変更
 		if (seg_ovride == 0 && !opsize_ovride && !addrsize_ovride &&!repe_prefix && !repne_prefix) {
@@ -2518,6 +2528,13 @@ void CPU::exec(u32 exec_clks) {
 					di++;
 					si++;
 					cnt--;
+					CLKS(CLK_MOVS);
+					if (clks <= 0 && cnt != 0) {
+						cx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 			} else { // 8bit処理でもopsize32用の対応が必要
 				(repe_prefix)? cnt = ecx, ecx = 0 : cnt = 1;
@@ -2526,6 +2543,13 @@ void CPU::exec(u32 exec_clks) {
 					edi++;
 					esi++;
 					cnt--;
+					CLKS(CLK_MOVS);
+					if (clks <= 0 && cnt != 0) {
+						ecx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 			}
 			break;
@@ -2539,6 +2563,13 @@ void CPU::exec(u32 exec_clks) {
 					di += 2;
 					si += 2;
 					cnt--;
+					CLKS(CLK_MOVS);
+					if (clks <= 0 && cnt != 0) {
+						cx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 			} else {
 				DAS_pr("MOVSD\n");
@@ -2548,6 +2579,13 @@ void CPU::exec(u32 exec_clks) {
 					edi++;
 					esi++;
 					cnt--;
+					CLKS(CLK_MOVS);
+					if (clks <= 0 && cnt != 0) {
+						ecx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 			}
 			break;
@@ -2561,6 +2599,7 @@ void CPU::exec(u32 exec_clks) {
 				(repne_prefix)?	cnt = cx : cnt = 1;
 				incdec = (flagu8 & DF8)? -1 : +1;
 				while (cnt != 0) {
+					CLKS(CLK_CMPS);
 					dst = mem->read8(get_seg_adr(DS, si));
 					src = mem->read8(get_seg_adr(ES, di));
 					res = dst - src;
@@ -2570,6 +2609,12 @@ void CPU::exec(u32 exec_clks) {
 					si += incdec;
 					di += incdec;
 					cnt--;
+					if (clks <= 0 && cnt != 0) {
+						cx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 				cx = cnt;
 				FLAG8bSUB(res, src, dst, );
@@ -2578,6 +2623,7 @@ void CPU::exec(u32 exec_clks) {
 				(repne_prefix)?	cnt = ecx : cnt = 1;
 				incdec = (flagu8 & DF8)? -1 : +1;
 				while (cnt != 0) {
+					CLKS(CLK_CMPS);
 					dst = mem->read8(get_seg_adr(DS, esi));
 					src = mem->read8(get_seg_adr(ES, edi));
 					res = dst - src;
@@ -2587,6 +2633,12 @@ void CPU::exec(u32 exec_clks) {
 					esi += incdec;
 					edi += incdec;
 					cnt--;
+					if (clks <= 0 && cnt != 0) {
+						ecx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 				ecx = cnt;
 				FLAG8bSUB(res, src, dst, );
@@ -2600,6 +2652,7 @@ void CPU::exec(u32 exec_clks) {
 				(repne_prefix)?	cnt = cx : cnt = 1;
 				incdec = (flagu8 & DF8)? -2 : +2;
 				while (cnt != 0) {
+					CLKS(CLK_CMPS);
 					dst = mem->read16(get_seg_adr(DS, si));
 					src = mem->read16(get_seg_adr(ES, di));
 					res = dst - src;
@@ -2609,6 +2662,12 @@ void CPU::exec(u32 exec_clks) {
 					si += incdec;
 					di += incdec;
 					cnt--;
+					if (clks <= 0 && cnt != 0) {
+						cx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 				cx = cnt;
 				FLAG8wSUB(res, src, dst, );
@@ -2618,6 +2677,7 @@ void CPU::exec(u32 exec_clks) {
 				(repne_prefix)?	cnt = ecx : cnt = 1;
 				incdec = (flagu8 & DF8)? -4 : +4;
 				while (cnt != 0) {
+					CLKS(CLK_CMPS);
 					dst = mem->read32(get_seg_adr(DS, esi));
 					src = mem->read32(get_seg_adr(ES, edi));
 					res = dst - src;
@@ -2627,6 +2687,12 @@ void CPU::exec(u32 exec_clks) {
 					esi += incdec;
 					edi += incdec;
 					cnt--;
+					if (clks <= 0 && cnt != 0) {
+						ecx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 				ecx = cnt;
 				FLAG8dSUB(res, src, dst, );
@@ -2648,6 +2714,13 @@ void CPU::exec(u32 exec_clks) {
 					mem->write8(get_seg_adr(ES, di), al);
 					di += incdec;
 					cnt--;
+					CLKS(CLK_STOS);
+					if (clks <= 0 && cnt != 0) {
+						cx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 			} else { // 8bit処理でもopsize32用の対応が必要
 				(repe_prefix)? cnt = ecx, ecx = 0 : cnt = 1;
@@ -2656,6 +2729,13 @@ void CPU::exec(u32 exec_clks) {
 					mem->write8(get_seg_adr(ES, edi), al);
 					edi += incdec;
 					cnt--;
+					CLKS(CLK_STOS);
+					if (clks <= 0 && cnt != 0) {
+						ecx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 			}
 			break;
@@ -2669,6 +2749,13 @@ void CPU::exec(u32 exec_clks) {
 					mem->write16(get_seg_adr(ES, di), ax);
 					di += incdec;
 					cnt--;
+					CLKS(CLK_STOS);
+					if (clks <= 0 && cnt != 0) {
+						cx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 			} else {
 				DAS_pr("STOSD\n");
@@ -2678,6 +2765,13 @@ void CPU::exec(u32 exec_clks) {
 					mem->write32(get_seg_adr(ES, edi), eax);
 					edi += incdec;
 					cnt--;
+					CLKS(CLK_STOS);
+					if (clks <= 0 && cnt != 0) {
+						ecx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 			}
 			break;
@@ -2694,6 +2788,13 @@ void CPU::exec(u32 exec_clks) {
 					al = mem->read8(get_seg_adr(DS, si));
 					si++;
 					cnt--;
+					CLKS(CLK_LODS);
+					if (clks <= 0 && cnt != 0) {
+						cx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 			} else {
 				(repe_prefix)? cnt = ecx, ecx = 0 : cnt = 1;
@@ -2701,6 +2802,13 @@ void CPU::exec(u32 exec_clks) {
 					al = mem->read8(get_seg_adr(DS, esi));
 					esi++;
 					cnt--;
+					CLKS(CLK_LODS);
+					if (clks <= 0 && cnt != 0) {
+						ecx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 			}
 			break;
@@ -2717,6 +2825,13 @@ void CPU::exec(u32 exec_clks) {
 					ax = mem->read16(get_seg_adr(DS, esi));
 					si += 2;
 					cnt--;
+					CLKS(CLK_LODS);
+					if (clks <= 0 && cnt != 0) {
+						cx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 			} else {
 				DAS_pr("LODSD\n");
@@ -2725,6 +2840,13 @@ void CPU::exec(u32 exec_clks) {
 					eax = mem->read32(get_seg_adr(DS, esi));
 					esi += 4;
 					cnt--;
+					CLKS(CLK_LODS);
+					if (clks <= 0 && cnt != 0) {
+						ecx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 			}
 			break;
@@ -2738,6 +2860,7 @@ void CPU::exec(u32 exec_clks) {
 				(repe_prefix || repne_prefix)? cnt = cx : cnt = 1;
 				incdec = (flagu8 & DF8)? -1 : +1;
 				while (cnt != 0) {
+					CLKS(CLK_SCAS);
 					dst = al;
 					src = mem->read8(get_seg_adr(ES, di));
 					res = dst - src;
@@ -2751,12 +2874,19 @@ void CPU::exec(u32 exec_clks) {
 					}
 					di += incdec;
 					cnt--;
+					if (clks <= 0 && cnt != 0) {
+						cx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 				cx = cnt;
 			} else { // 8bit処理でもopsize32用の対応が必要
 				(repe_prefix || repne_prefix)? cnt = ecx : cnt = 1;
 				incdec = (flagu8 & DF8)? -1 : +1;
 				while (cnt != 0) {
+					CLKS(CLK_SCAS);
 					dst = al;
 					src = mem->read8(get_seg_adr(ES, edi));
 					res = dst - src;
@@ -2770,6 +2900,12 @@ void CPU::exec(u32 exec_clks) {
 					}
 					edi += incdec;
 					cnt--;
+					if (clks <= 0 && cnt != 0) {
+						ecx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 				ecx = cnt;
 			}
@@ -2783,6 +2919,7 @@ void CPU::exec(u32 exec_clks) {
 				(repe_prefix || repne_prefix)? cnt = cx : cnt = 1;
 				incdec = (flagu8 & DF8)? -2 : +2;
 				while (cnt != 0) {
+					CLKS(CLK_SCAS);
 					dst = ax;
 					src = mem->read16(get_seg_adr(ES, di));
 					res = dst - src;
@@ -2796,6 +2933,12 @@ void CPU::exec(u32 exec_clks) {
 					}
 					di += incdec;
 					cnt--;
+					if (clks <= 0 && cnt != 0) {
+						cx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 				cx = cnt;
 				FLAG8wSUB(res, src, dst, );
@@ -2805,6 +2948,7 @@ void CPU::exec(u32 exec_clks) {
 				(repe_prefix || repne_prefix)? cnt = ecx : cnt = 1;
 				incdec = (flagu8 & DF8)? -4 : +4;
 				while (cnt != 0) {
+					CLKS(CLK_SCAS);
 					dst = eax;
 					src = mem->read32(get_seg_adr(ES, edi));
 					res = dst - src;
@@ -2818,6 +2962,12 @@ void CPU::exec(u32 exec_clks) {
 					}
 					edi += incdec;
 					cnt--;
+					if (clks <= 0 && cnt != 0) {
+						ecx = cnt;
+						isRealMode? ip-- : eip--;
+						OP_CONTINUE();
+						return;
+					}
 				}
 				ecx = cnt;
 				FLAG8dSUB(res, src, dst, );
@@ -4020,5 +4170,8 @@ void CPU::exec(u32 exec_clks) {
 		addrsize = isRealMode?
 			size16 : (sdcr[CS].attr & 0x400)?
 			size32 : size16;
+#ifdef CORE_DAS
+		op_continue = false;
+#endif
 	}
 }

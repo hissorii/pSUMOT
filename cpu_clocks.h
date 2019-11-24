@@ -142,5 +142,11 @@
 
 #define CLK_XLAT		5
 
+#define CLK_MOVS		7
+#define CLK_CMPS		10
+#define CLK_STOS		4
+#define CLK_LODS		5
+#define CLK_SCAS		7
 
-// xxx Jcc, CALL, RET, MOVS, CMPS, STOS, LODS, SCAS, INT, LOOP, JMP, MUL
+
+// xxx Jcc, CALL, RET, INT, LOOP, JMP, MUL

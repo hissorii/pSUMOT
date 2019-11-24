@@ -38,14 +38,16 @@ int main(void)
 	sdl_surface = SDL_GetWindowSurface(sdl_window);
 
 	printf("Bpp=%d\n", sdl_surface->format->BytesPerPixel);
+
 #endif //VIDEO_TEST
 
 	while (1) {
-		cpu.exec(28000);
+		cpu.exec(280000);
 
 #ifdef VIDEO_TEST
 		pt = (int *)sdl_surface->pixels;
 		for (int i = 0; i < 640*400/8; i++) {
+#if 0
 			mem.write8(0xcff83, 0x0);
 			mem.write8(0xcff81, 0);
 			b = mem.read8(0xc0000 + i);
@@ -55,6 +57,12 @@ int main(void)
 			g = mem.read8(0xc0000 + i);
 			mem.write8(0xcff81, 0xc0);
 			a = mem.read8(0xc0000 + i);
+#else
+			b = mem.read8(0x80000000 + i);
+			r = mem.read8(0x80008000 + i);
+			g = mem.read8(0x80010000 + i);
+			a = mem.read8(0x80018000 + i);
+#endif
 			for (int j = 0; j < 8; j++) {
 				// 各プレーンから1bitずつデータを取ってくる
 				*pt++ = ((a & 0x80) << 24) + ((r & 0x80) << 16) + ((g & 0x80) << 8) + (b & 0x80);

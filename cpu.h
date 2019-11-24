@@ -313,7 +313,7 @@ private:
 	SIZEPRFX opsize, addrsize;
 	bool isRealMode;
 
-	u32 clks;
+	s32 clks;
 
 	BUS *mem, *io;
 
@@ -322,6 +322,7 @@ private:
 
 #ifdef CORE_DAS
 	bool DAS_hlt;
+	bool op_continue = false;
 
 	void DAS_dump_reg();
 	void DAS_prt_post_op(u8 n);
