@@ -8,6 +8,7 @@ using namespace std; // for printf()
 CPU::CPU(BUS* bus) {
 	mem = bus->get_bus("mem");
 	io = bus->get_bus("io");
+	dmac = (DMAC *)bus->get_bus("dmac");
 
 	// バイト同士の演算によるフラグSF/ZF/PF/CFの状態をあらかじめ算出する
 	// キャリーフラグ算出のため、配列長は9ビットである
@@ -74,6 +75,8 @@ void CPU::reset() {
 	sdcr[CS].base = 0xffff0000;
 	flag8 = 0;
 	cr[0] = 0x60000010;
+
+	remains_clks = 0;
 
 #ifdef CORE_DAS
 	DAS_hlt = false;
@@ -509,7 +512,7 @@ void CPU::update_segreg(const u8 seg, const u16 n) {
 
 #define CLKS(clk_op) clks -= (clk_op)
 
-void CPU::exec(u32 exec_clks) {
+s32 CPU::exec(void) {
 	u8 op, subop;
 	u16 warg1, warg2;
 	u32 darg1;
@@ -521,8 +524,8 @@ void CPU::exec(u32 exec_clks) {
 	u32 cnt;
 	s32 incdec;
 
-	clks = exec_clks;
-	while (clks > 0) { // xxx マイナスになった分はどこかで補填する?
+	clks = remains_clks;
+	while (clks > exit_clks) { // xxx マイナスになった分はどこかで補填する?
 
 #if 0	// MAMEとの比較用に一時的に変更
 		if (seg_ovride == 0 && !opsize_ovride && !addrsize_ovride &&!repe_prefix && !repne_prefix) {
@@ -531,6 +534,9 @@ void CPU::exec(u32 exec_clks) {
 #else
 		DAS_dump_reg();
 #endif
+
+		if (dmac->working) {
+		}
 
 		// リアルモードでip++した時に16bitをこえて0に戻る場合を考慮し、
 		// リアルモードの場合はeip++ではなくip++するようにした。
@@ -2533,7 +2539,7 @@ void CPU::exec(u32 exec_clks) {
 						cx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 			} else { // 8bit処理でもopsize32用の対応が必要
@@ -2548,7 +2554,7 @@ void CPU::exec(u32 exec_clks) {
 						ecx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 			}
@@ -2568,7 +2574,7 @@ void CPU::exec(u32 exec_clks) {
 						cx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 			} else {
@@ -2584,7 +2590,7 @@ void CPU::exec(u32 exec_clks) {
 						ecx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 			}
@@ -2613,7 +2619,7 @@ void CPU::exec(u32 exec_clks) {
 						cx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 				cx = cnt;
@@ -2637,7 +2643,7 @@ void CPU::exec(u32 exec_clks) {
 						ecx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 				ecx = cnt;
@@ -2666,7 +2672,7 @@ void CPU::exec(u32 exec_clks) {
 						cx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 				cx = cnt;
@@ -2691,7 +2697,7 @@ void CPU::exec(u32 exec_clks) {
 						ecx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 				ecx = cnt;
@@ -2719,7 +2725,7 @@ void CPU::exec(u32 exec_clks) {
 						cx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 			} else { // 8bit処理でもopsize32用の対応が必要
@@ -2734,7 +2740,7 @@ void CPU::exec(u32 exec_clks) {
 						ecx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 			}
@@ -2754,7 +2760,7 @@ void CPU::exec(u32 exec_clks) {
 						cx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 			} else {
@@ -2770,7 +2776,7 @@ void CPU::exec(u32 exec_clks) {
 						ecx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 			}
@@ -2793,7 +2799,7 @@ void CPU::exec(u32 exec_clks) {
 						cx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 			} else {
@@ -2807,7 +2813,7 @@ void CPU::exec(u32 exec_clks) {
 						ecx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 			}
@@ -2830,7 +2836,7 @@ void CPU::exec(u32 exec_clks) {
 						cx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 			} else {
@@ -2845,7 +2851,7 @@ void CPU::exec(u32 exec_clks) {
 						ecx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 			}
@@ -2878,7 +2884,7 @@ void CPU::exec(u32 exec_clks) {
 						cx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 				cx = cnt;
@@ -2904,7 +2910,7 @@ void CPU::exec(u32 exec_clks) {
 						ecx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 				ecx = cnt;
@@ -2937,7 +2943,7 @@ void CPU::exec(u32 exec_clks) {
 						cx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 				cx = cnt;
@@ -2966,7 +2972,7 @@ void CPU::exec(u32 exec_clks) {
 						ecx = cnt;
 						isRealMode? ip-- : eip--;
 						OP_CONTINUE();
-						return;
+						return clks;
 					}
 				}
 				ecx = cnt;
@@ -3941,16 +3947,16 @@ void CPU::exec(u32 exec_clks) {
 
 		case 0x26: // SEG=ES
 			SEG_OVRIDE(ES);
-			return; // リターンする
+			return clks; // リターンする
 		case 0x2e: // SEG=CS
 			SEG_OVRIDE(CS);
-			return; // リターンする
+			return clks; // リターンする
 		case 0x36: // SEG=SS
 			SEG_OVRIDE(SS);
-			return; // リターンする
+			return clks; // リターンする
 		case 0x3e: // SEG=DS
 			SEG_OVRIDE(DS);
-			return; // リターンする
+			return clks; // リターンする
 
 
 /*************** オペランドサイズオーバーライドプリフィックス ***************/
@@ -3962,7 +3968,7 @@ void CPU::exec(u32 exec_clks) {
 			opsize = isRealMode?
 				size32 : (sdcr[CS].attr & 0x400)?
 				size16 : size32;
-			return; // リターンする
+			return clks; // リターンする
 
 /*************** アドレスサイズオーバーライドプリフィックス ***************/
 
@@ -3973,7 +3979,7 @@ void CPU::exec(u32 exec_clks) {
 			addrsize = isRealMode?
 				size32 : (sdcr[CS].attr & 0x400)?
 				size16 : size32;
-			return; // リターンする
+			return clks; // リターンする
 
 /*************** LOCK ***************/
 
@@ -3990,13 +3996,13 @@ void CPU::exec(u32 exec_clks) {
 			DAS_prt_post_op(0);
 			DAS_pr("Repne Prefix\n");
 			repne_prefix = true;
-			return;
+			return clks;
 		case 0xf3:
 			// repeでZFをチェックするのはCMPSとSCASのみ
 			DAS_prt_post_op(0);
 			DAS_pr("Repe Prefix\n");
 			repe_prefix = true;
-			return;
+			return clks;
 
 /******************** HLT ********************/
 
@@ -4010,7 +4016,7 @@ void CPU::exec(u32 exec_clks) {
 			DAS_hlt = true; // xxx いつかfalseに戻す
 #endif
 			eip--;
-			return; // リターンする？
+			return clks; // リターンする？
 
 /******************** プロセッサコントロール ********************/
 
@@ -4174,4 +4180,6 @@ void CPU::exec(u32 exec_clks) {
 		op_continue = false;
 #endif
 	}
+
+	return clks;
 }

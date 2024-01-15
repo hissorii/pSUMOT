@@ -1,6 +1,8 @@
 #pragma once
 #include "types.h"
 
+class Event;
+
 class BUS {
 /*-----
   [2019-08-08]
@@ -14,6 +16,7 @@ protected:
 	static BUS *io;
 	static BUS *dmac;
 	static BUS *cdc;
+	static Event *ev;
 public:
 	/*-----
 	  抽象仮想関数 [2019-08-08]
@@ -26,4 +29,5 @@ public:
 	virtual void write32(u32 addr, u32 data) = 0;
 
 	BUS* get_bus(const char *s);
+	void set_ev(Event *ev);
 };

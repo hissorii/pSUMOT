@@ -1,6 +1,7 @@
 // [2019-06-20] 書き始め
 #include "types.h"
 #include "bus.h"
+#include "dmac.h"
 
 /*
   * 80386 General Registers
@@ -313,9 +314,8 @@ private:
 	SIZEPRFX opsize, addrsize;
 	bool isRealMode;
 
-	s32 clks;
-
 	BUS *mem, *io;
+	DMAC *dmac;
 
 	u32 get_seg_adr(const SEGREG seg, const u32 a);
 	void update_segreg(const u8 seg, const u16 n);
@@ -337,9 +337,10 @@ private:
 	u8 modrmb(u8 modrm);
 
 public:
+	s32 clks, remains_clks, exit_clks;
 	CPU(BUS* bus);
 	void reset();
-	void exec(u32 exec_clks);
+	s32 exec(void);
 };
 
 /* 参考文献
